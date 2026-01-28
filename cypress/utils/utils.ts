@@ -21,6 +21,7 @@ import { CredentialsProxy } from "../e2e/models/administration/credentials/crede
 import { CredentialsSourceControlKey } from "../e2e/models/administration/credentials/credentialsSourceControlKey";
 import { CredentialsSourceControlUsername } from "../e2e/models/administration/credentials/credentialsSourceControlUsername";
 import { Jira } from "../e2e/models/administration/jira-connection/jira";
+import { AnalysisProfile } from "../e2e/models/migration/analysis-profiles/analysis-profile";
 import { Application } from "../e2e/models/migration/applicationinventory/application";
 import { Archetype } from "../e2e/models/migration/archetypes/archetype";
 import { BusinessServices } from "../e2e/models/migration/controls/businessservices";
@@ -144,28 +145,18 @@ import Chainable = Cypress.Chainable;
  * @param fieldId - CSS selector for the field
  * @param text - Text to enter
  * @param log - Whether to log Cypress commands (default: false)
- * @param useInvoke - Set to true for faster text entry via .invoke("val") when
- *                    keyboard events are not needed (default: false uses .type())
  */
 export function inputText(
   fieldId: string,
   text: string | string[],
-  log = false,
-  useInvoke = false
+  log = false
 ): void {
   if (!log) {
     cy.log(`Type ${text} in ${fieldId}`);
   }
-
-  if (useInvoke) {
-    cy.get(fieldId, { log, timeout: 2 * SEC })
-      .clear({ log, timeout: 30 * SEC })
-      .invoke("val", text);
-  } else {
-    cy.get(fieldId, { log, timeout: 2 * SEC })
-      .clear({ log, timeout: 30 * SEC })
-      .type(Array.isArray(text) ? text.join(" ") : text, { log });
-  }
+  cy.get(fieldId, { log, timeout: 2 * SEC })
+    .clear({ log, timeout: 30 * SEC })
+    .type(Array.isArray(text) ? text.join(" ") : text, { log });
 }
 
 export function clearInput(fieldID: string): void {
@@ -1243,7 +1234,8 @@ export function getRandomAnalysisData(analysisdata): analysisData {
     appName: analysisdata.appName,
     effort: analysisdata.effort,
     excludePackages: analysisdata.excludePackages,
-    excludeRuleTags: analysisdata.excludeRuleTags,
+    includeRuleLabels: analysisdata.includeRuleLabels,
+    excludeRuleLabels: analysisdata.excludeRuleLabels,
     manuallyAnalyzePackages: analysisdata.manuallyAnalyzePackages,
     excludedPackagesList: analysisdata.excludedPackagesList,
     incidents: analysisdata.incidents,
@@ -1465,6 +1457,12 @@ export function deleteAllArchetypes() {
 
 export function deleteAllCredentials() {
   Credentials.openList();
+  selectItemsPerPage(100);
+  deleteAllRows();
+}
+
+export function deleteAllProfiles() {
+  AnalysisProfile.open();
   selectItemsPerPage(100);
   deleteAllRows();
 }

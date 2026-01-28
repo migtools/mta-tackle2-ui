@@ -116,7 +116,8 @@ export type analysisData = {
   customRule?: string[];
   customRuleRepository?: RulesRepositoryFields;
   sources?: string;
-  excludeRuleTags?: string;
+  excludeRuleLabels?: string;
+  includeRuleLabels?: string;
   enableTransaction?: boolean;
   disableTagging?: boolean;
   appName?: string;
@@ -135,6 +136,7 @@ export type analysisData = {
   };
   techTags?: string[][];
   ruleFileToQuantity?: { [id: string]: number };
+  profileName?: string;
 };
 
 export type UserData = {
