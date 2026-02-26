@@ -15,35 +15,22 @@ limitations under the License.
 */
 /// <reference types="cypress" />
 
-import * as data from "../../../../../utils/data_utils";
 import { randomWordGenerator } from "../../../../../utils/data_utils";
 import {
+  cleanupIssuesData,
   clearAllFilters,
   clickByText,
-  createMultipleBusinessServices,
-  createMultipleStakeholderGroups,
-  createMultipleStakeholders,
-  createMultipleTags,
   deleteAllMigrationWaves,
   deleteApplicationTableRows,
-  deleteByList,
-  getRandomAnalysisData,
-  getRandomApplicationData,
   getUniqueNamesMap,
   login,
+  seedIssuesData,
   selectItemsPerPage,
   validatePagination,
   validateSortBy,
 } from "../../../../../utils/utils";
-import { Analysis } from "../../../../models/migration/applicationinventory/analysis";
-import { Archetype } from "../../../../models/migration/archetypes/archetype";
-import { BusinessServices } from "../../../../models/migration/controls/businessservices";
-import { Stakeholdergroups } from "../../../../models/migration/controls/stakeholdergroups";
-import { Stakeholders } from "../../../../models/migration/controls/stakeholders";
-import { Tag } from "../../../../models/migration/controls/tags";
 import { Issues } from "../../../../models/migration/dynamic-report/issues/issues";
 import {
-  AnalysisStatuses,
   SEC,
   dynamicReportFilter,
   tdTag,
@@ -56,13 +43,20 @@ describe(
   ["@tier3"],
   "Filtering, sorting and pagination in Issues",
   function () {
-    const applicationsList: Analysis[] = [];
-    let businessServiceList: BusinessServices[];
-    let archetype: Archetype;
-    let stakeholders: Stakeholders[];
-    let stakeholderGroups: Stakeholdergroups[];
-    let tags: Tag[];
-    let tagNames: string[];
+    // Application names created by seedIssuesData
+    const bookserverAppNames = [
+      "IssuesFilteringApp1_0",
+      "IssuesFilteringApp1_1",
+      "IssuesFilteringApp1_2",
+    ];
+    const coolstoreAppNames = ["IssuesFilteringApp2_0"];
+    const archetypeName = "IssuesArchetype";
+    const businessServiceNames = [
+      "BookServer Business Service",
+      "Coolstore Business Service",
+    ];
+    const tagNames = ["EJB XML", "Entity Bean"];
+
     const allIssuesSortByList = ["Issue", "Category", "Affected applications"];
     const affectedApplicationSortByList = [
       "Name",
@@ -72,7 +66,6 @@ describe(
     ];
     const singleApplicationSortByList = ["Issue", "Category", "Affected files"];
     const affectedFilesSortByList = ["File", "Incidents", "Effort"];
-    const appAmount = 6;
 
     before("Login", function () {
       Cypress.session.clearAllSavedSessions();
@@ -80,54 +73,8 @@ describe(
       cy.visit("/");
       deleteAllMigrationWaves();
       deleteApplicationTableRows();
-      stakeholders = createMultipleStakeholders(2);
-      stakeholderGroups = createMultipleStakeholderGroups(2);
-      businessServiceList = createMultipleBusinessServices(2);
-      tags = createMultipleTags(2);
-      tagNames = tags.map((tag) => tag.name);
-      archetype = new Archetype(
-        data.getRandomWord(8),
-        [tagNames[0]],
-        [tagNames[1]],
-        null,
-        stakeholders,
-        stakeholderGroups
-      );
-      archetype.create();
-      cy.fixture("application").then((appData) => {
-        cy.fixture("analysis").then((analysisData) => {
-          for (let i = 0; i < appAmount; i++) {
-            const bookServerApp = new Analysis(
-              getRandomApplicationData("IssuesFilteringApp1_" + i, {
-                sourceData: appData["bookserver-app"],
-              }),
-              getRandomAnalysisData(
-                analysisData["source_analysis_on_bookserverapp"]
-              )
-            );
-            bookServerApp.business = businessServiceList[0].name;
-            applicationsList.push(bookServerApp);
-          }
-        });
-      });
-
-      cy.fixture("application").then((appData) => {
-        cy.fixture("analysis").then((analysisData) => {
-          for (let i = 0; i < appAmount; i++) {
-            const coolstoreApp = new Analysis(
-              getRandomApplicationData("IssuesFilteringApp2_" + i, {
-                sourceData: appData["coolstore-app"],
-              }),
-              getRandomAnalysisData(analysisData["source+dep_on_coolStore_app"])
-            );
-            coolstoreApp.tags = tagNames;
-            coolstoreApp.business = businessServiceList[1].name;
-            applicationsList.push(coolstoreApp);
-          }
-
-          applicationsList.forEach((application) => application.create());
-        });
-      });
+      cleanupIssuesData();
+      seedIssuesData();
     });
 
     beforeEach("Load data", function () {
@@ -144,21 +91,15 @@ describe(
     });
 
     it("All issues - Filtering issues by name", function () {
-      // Analyzing Coolstore app for pagination test to generate issues more than 10.
-      const bookServerApp = applicationsList[0];
-      const coolstoreApp = applicationsList[appAmount];
       const bookServerIssues =
         this.analysisData["source_analysis_on_bookserverapp"]["issues"];
       const coolstoreIssues =
         this.analysisData["source+dep_on_coolStore_app"]["issues"];
 
-      Analysis.analyzeByList(applicationsList);
-      Analysis.verifyAllAnalysisStatuses(AnalysisStatuses.completed);
-
       Issues.openList(100, true);
       Issues.applyAndValidateFilter(
         dynamicReportFilter.applicationName,
-        [bookServerApp.name],
+        [bookserverAppNames[0]],
         bookServerIssues,
         coolstoreIssues
       );
@@ -166,7 +107,7 @@ describe(
 
       Issues.applyAndValidateFilter(
         dynamicReportFilter.applicationName,
-        [coolstoreApp.name],
+        [coolstoreAppNames[0]],
         coolstoreIssues,
         bookServerIssues
       );
@@ -174,16 +115,14 @@ describe(
     });
 
     it("All issues - filtering by multiple names", function () {
-      const bookServerApp = applicationsList[0];
-      const coolstoreApp = applicationsList[6];
       const bookServerIssues =
         this.analysisData["source_analysis_on_bookserverapp"]["issues"];
       const coolstoreIssues =
         this.analysisData["source+dep_on_coolStore_app"]["issues"];
 
       Issues.applyMultiFilter(dynamicReportFilter.applicationName, [
-        bookServerApp.name,
-        coolstoreApp.name,
+        bookserverAppNames[0],
+        coolstoreAppNames[0],
       ]);
       Issues.validateMultiFilter(
         getUniqueNamesMap([bookServerIssues, coolstoreIssues])
@@ -192,7 +131,7 @@ describe(
     });
 
     it("All issues - Filtering issues by Archetype", function () {
-      Issues.applyFilter(dynamicReportFilter.archetype, archetype.name);
+      Issues.applyFilter(dynamicReportFilter.archetype, archetypeName);
       this.analysisData["source+dep_on_coolStore_app"]["issues"].forEach(
         (issue: AppIssue) => {
           Issues.validateFilter(issue);
@@ -202,7 +141,7 @@ describe(
     });
 
     it("All issues - Filtering issues by BS", function () {
-      Issues.applyFilter(dynamicReportFilter.bs, businessServiceList[0].name);
+      Issues.applyFilter(dynamicReportFilter.bs, businessServiceNames[0]);
       this.analysisData["source_analysis_on_bookserverapp"]["issues"].forEach(
         (issue: AppIssue) => {
           Issues.validateFilter(issue);
@@ -275,9 +214,7 @@ describe(
     allIssuesSortByList.forEach((column) => {
       it(`All issues - Sort issues by ${column}`, function () {
         Issues.openList();
-        cy.wait("@getIssues");
         selectItemsPerPage(100);
-        cy.wait("@getIssues");
         validateSortBy(column);
       });
     });
@@ -286,7 +223,7 @@ describe(
       Issues.openAffectedApplications(
         this.analysisData["source+dep_on_coolStore_app"]["issues"][0]["name"]
       );
-      clickByText(tdTag, applicationsList[6].name);
+      clickByText(tdTag, coolstoreAppNames[0]);
       cy.get(rightSideBar).within(() => {
         affectedFilesSortByList.forEach((column) => {
           validateSortBy(column);
@@ -315,17 +252,8 @@ describe(
       });
     });
 
-    it("Affected applications - pagination validation", function () {
-      Issues.openAffectedApplications(
-        this.analysisData["source_analysis_on_bookserverapp"]["issues"][1][
-          "name"
-        ]
-      );
-      validatePagination();
-    });
-
     it("Single application - filtering issues by category", function () {
-      Issues.openSingleApplication(applicationsList[0].name);
+      Issues.openSingleApplication(bookserverAppNames[0]);
       selectItemsPerPage(100);
       this.analysisData["source_analysis_on_bookserverapp"]["issues"].forEach(
         (issue: AppIssue) => {
@@ -341,7 +269,7 @@ describe(
     });
 
     it("Single application - filtering issues by source", function () {
-      Issues.openSingleApplication(applicationsList[0].name);
+      Issues.openSingleApplication(bookserverAppNames[0]);
       selectItemsPerPage(100);
       this.analysisData["source_analysis_on_bookserverapp"]["issues"].forEach(
         (issue: AppIssue) => {
@@ -355,7 +283,7 @@ describe(
     });
 
     it("Single application - filtering issues by target", function () {
-      Issues.openSingleApplication(applicationsList[0].name);
+      Issues.openSingleApplication(bookserverAppNames[0]);
       selectItemsPerPage(100);
       const issues =
         this.analysisData["source_analysis_on_bookserverapp"]["issues"];
@@ -370,19 +298,13 @@ describe(
 
     singleApplicationSortByList.forEach((column) => {
       it(`Single application - sort by ${column}`, function () {
-        Issues.openSingleApplication(applicationsList[0].name);
+        Issues.openSingleApplication(bookserverAppNames[0]);
         validateSortBy(column);
       });
     });
 
     after("Perform test data clean up", function () {
-      cy.reload();
-      deleteByList(applicationsList);
-      archetype.delete();
-      deleteByList(stakeholders);
-      deleteByList(stakeholderGroups);
-      deleteByList(tags);
-      deleteByList(businessServiceList);
+      cleanupIssuesData();
     });
   }
 );

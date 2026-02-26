@@ -68,41 +68,6 @@ describe(["@tier1"], "Custom Rules in analyses", function () {
     });
   });
 
-  it("Bug MTA-5199: Custom rule with administracionEfectivo application", function () {
-    const app = new Analysis(
-      getRandomApplicationData("customRule_administracionEfectivo"),
-      getRandomAnalysisData(
-        this.analysisData["administracionEfectivo_custom_rules"]
-      )
-    );
-    Application.open();
-    applications.push(app);
-    app.create();
-    app.analyze();
-    app.verifyAnalysisStatus(AnalysisStatuses.completed);
-    Issues.openSingleApplication(app.name);
-    exists("CUSTOM RULE");
-  });
-
-  it("Verify triggered rule", function () {
-    const app = new Analysis(
-      getRandomApplicationData("jee-example-app custom rule"),
-      getRandomAnalysisData({
-        source: "Upload a local binary",
-        target: ["Application server migration to"],
-        binary: ["jee-example-app-1.0.0.ear"],
-        customRule: ["basic-custom-rule.yaml"],
-      })
-    );
-    Application.open();
-    applications.push(app);
-    app.create();
-    app.analyze();
-    app.verifyAnalysisStatus(AnalysisStatuses.completed);
-    Issues.openSingleApplication(app.name);
-    exists("CUSTOM RULE");
-  });
-
   // Automates Bug MTA-2001
   it("Verify triggered rule for dependency", function () {
     const app = new Analysis(

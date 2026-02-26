@@ -553,7 +553,7 @@ export function applySelectFilter(
   if (isValid) {
     clickByText(".pf-v5-c-menu__item", filterText);
   } else {
-    cy.contains("span.pf-v5-c-menu__item-text", "No results");
+    cy.contains(actionMenuItem, "No results");
   }
   click(".pf-v5-c-text-input-group__text-input");
 }
@@ -689,7 +689,7 @@ export function verifySortDesc(
   unsortedList: unknown[]
 ): void {
   cy.wrap(listToVerify).then((capturedList) => {
-    const reverseSortedList = unsortedList.sort((a, b) =>
+    const reverseSortedList = unsortedList.slice().sort((a, b) =>
       b.toString().localeCompare(a.toString(), "en-us", {
         numeric: !unsortedList.some(isNaN),
       })
@@ -868,7 +868,7 @@ export function application_inventory_kebab_menu(menu: string): void {
   if (menu == "Import") {
     clickByText(button, "Import");
   } else {
-    cy.get("span.pf-v5-c-menu__item-text")
+    cy.get(actionMenuItem)
       .contains(menu)
       .then(($menu_item) => {
         if (!$menu_item.hasClass("pf-m-disabled")) {
@@ -1536,10 +1536,7 @@ export function deleteAllProfiles() {
 }
 
 export function deleteApplicationTableRows(): void {
-  navigate_to_application_inventory();
-  cy.intercept("GET", "/hub/application*").as("getApplication");
-  cy.wait("@getApplication", { timeout: 10 * SEC });
-  selectItemsPerPage(100);
+  Application.open();
   deleteAllItems();
 }
 
@@ -2074,7 +2071,7 @@ export function cleanupDownloads(): void {
   // This will eliminate content of `downloads` folder
   const downloadsFolder = Cypress.config("downloadsFolder");
   cy.exec(
-    `bash -lc 'set -euo pipefail; cd "$DOWNLOADS_FOLDER"; rm -rf -- ./*'`,
+    `bash -lc 'set -euo pipefail; mkdir -p "$DOWNLOADS_FOLDER"; cd "$DOWNLOADS_FOLDER"; rm -rf -- ./*'`,
     {
       env: { DOWNLOADS_FOLDER: String(downloadsFolder) },
     }
@@ -2209,8 +2206,13 @@ export function seedAnalysisData(applicationId: number): void {
     `seedAnalysisData: hostname=${hostname}, username=${username}, applicationId=${applicationId}`
   );
 
-  const command = `cd fixtures && chmod +x analysis.sh && HOST=${hostname} USERNAME=${username} PASSWORD=${password} ./analysis.sh ${applicationId}`;
+  const command = `cd fixtures && chmod +x analysis.sh && ./analysis.sh ${applicationId}`;
   cy.exec(command, {
+    env: {
+      HOST: String(hostname),
+      USERNAME: String(username ?? ""),
+      PASSWORD: String(password ?? ""),
+    },
     timeout: 120 * SEC,
     failOnNonZeroExit: false,
   }).then((result) => {
@@ -2244,6 +2246,195 @@ export function seedAnalysisData(applicationId: number): void {
   });
 }
 
+export function seedIssuesData(): void {
+  const baseUrl = Cypress.config("baseUrl");
+  const hostname = new URL(baseUrl).origin;
+  const username = Cypress.env("user");
+  const password = Cypress.env("pass");
+
+  const command = `cd fixtures && chmod +x issues.sh && ./issues.sh`;
+  cy.exec(command, {
+    env: {
+      HOST: String(hostname),
+      USERNAME: String(username ?? ""),
+      PASSWORD: String(password ?? ""),
+    },
+    timeout: 180 * SEC,
+    failOnNonZeroExit: false,
+  }).then((result) => {
+    const isSuccess = result.stdout.includes(
+      "Issues seeding completed successfully!"
+    );
+    if (!isSuccess || result.exitCode !== 0) {
+      const errorContext = [
+        `seedIssuesData failed`,
+        `Exit code: ${result.exitCode}`,
+        `stdout: ${result.stdout}`,
+        `stderr: ${result.stderr}`,
+      ].join("\n");
+
+      throw new Error(errorContext);
+    }
+
+    expect(result.exitCode, "issues.sh should exit with code 0").to.eq(0);
+    expect(
+      result.stdout,
+      "issues.sh should output 'Issues seeding completed successfully!'"
+    ).to.include("Issues seeding completed successfully!");
+  });
+}
+
+export function cleanupIssuesData(): void {
+  const baseUrl = Cypress.config("baseUrl");
+  const hostname = new URL(baseUrl).origin;
+  const username = Cypress.env("user");
+  const password = Cypress.env("pass");
+
+  const command = `cd fixtures && chmod +x issues-cleanup.sh && ./issues-cleanup.sh`;
+  cy.exec(command, {
+    env: {
+      HOST: String(hostname),
+      USERNAME: String(username ?? ""),
+      PASSWORD: String(password ?? ""),
+    },
+    timeout: 180 * SEC,
+    failOnNonZeroExit: false,
+  }).then((result) => {
+    const isSuccess = result.stdout.includes("Cleanup completed successfully!");
+    if (!isSuccess || result.exitCode !== 0) {
+      cy.log(
+        `WARNING: cleanupIssuesData had issues (exit code: ${result.exitCode})`
+      );
+    }
+  });
+}
+
+export function seedInsightsData(): void {
+  const baseUrl = Cypress.config("baseUrl");
+  const hostname = new URL(baseUrl).origin;
+  const username = Cypress.env("user");
+  const password = Cypress.env("pass");
+
+  const command = `cd fixtures && chmod +x insights.sh && ./insights.sh`;
+  cy.exec(command, {
+    env: {
+      HOST: String(hostname),
+      USERNAME: String(username ?? ""),
+      PASSWORD: String(password ?? ""),
+    },
+    timeout: 180 * SEC,
+    failOnNonZeroExit: false,
+  }).then((result) => {
+    const isSuccess = result.stdout.includes(
+      "Insights seeding completed successfully!"
+    );
+    if (!isSuccess || result.exitCode !== 0) {
+      const errorContext = [
+        `seedInsightsData failed`,
+        `Exit code: ${result.exitCode}`,
+        `stdout: ${result.stdout}`,
+        `stderr: ${result.stderr}`,
+      ].join("\n");
+
+      throw new Error(errorContext);
+    }
+
+    expect(result.exitCode, "insights.sh should exit with code 0").to.eq(0);
+    expect(
+      result.stdout,
+      "insights.sh should output 'Insights seeding completed successfully!'"
+    ).to.include("Insights seeding completed successfully!");
+  });
+}
+
+export function cleanupInsightsData(): void {
+  const baseUrl = Cypress.config("baseUrl");
+  const hostname = new URL(baseUrl).origin;
+  const username = Cypress.env("user");
+  const password = Cypress.env("pass");
+
+  const command = `cd fixtures && chmod +x insights-cleanup.sh && ./insights-cleanup.sh`;
+  cy.exec(command, {
+    env: {
+      HOST: String(hostname),
+      USERNAME: String(username ?? ""),
+      PASSWORD: String(password ?? ""),
+    },
+    timeout: 180 * SEC,
+    failOnNonZeroExit: false,
+  }).then((result) => {
+    const isSuccess = result.stdout.includes("Cleanup completed successfully!");
+    if (!isSuccess || result.exitCode !== 0) {
+      cy.log(
+        `WARNING: cleanupInsightsData had issues (exit code: ${result.exitCode})`
+      );
+    }
+  });
+}
+
+export function seedDependenciesData(): void {
+  const baseUrl = Cypress.config("baseUrl");
+  const hostname = new URL(baseUrl).origin;
+  const username = Cypress.env("user");
+  const password = Cypress.env("pass");
+
+  const command = `cd fixtures && chmod +x dependencies.sh && ./dependencies.sh`;
+  cy.exec(command, {
+    env: {
+      HOST: String(hostname),
+      USERNAME: String(username ?? ""),
+      PASSWORD: String(password ?? ""),
+    },
+    timeout: 180 * SEC,
+    failOnNonZeroExit: false,
+  }).then((result) => {
+    const isSuccess = result.stdout.includes(
+      "Dependencies seeding completed successfully!"
+    );
+    if (!isSuccess || result.exitCode !== 0) {
+      const errorContext = [
+        `seedDependenciesData failed`,
+        `Exit code: ${result.exitCode}`,
+        `stdout: ${result.stdout}`,
+        `stderr: ${result.stderr}`,
+      ].join("\n");
+
+      throw new Error(errorContext);
+    }
+
+    expect(result.exitCode, "dependencies.sh should exit with code 0").to.eq(0);
+    expect(
+      result.stdout,
+      "dependencies.sh should output 'Dependencies seeding completed successfully!'"
+    ).to.include("Dependencies seeding completed successfully!");
+  });
+}
+
+export function cleanupDependenciesData(): void {
+  const baseUrl = Cypress.config("baseUrl");
+  const hostname = new URL(baseUrl).origin;
+  const username = Cypress.env("user");
+  const password = Cypress.env("pass");
+
+  const command = `cd fixtures && chmod +x dependencies-cleanup.sh && ./dependencies-cleanup.sh`;
+  cy.exec(command, {
+    env: {
+      HOST: String(hostname),
+      USERNAME: String(username ?? ""),
+      PASSWORD: String(password ?? ""),
+    },
+    timeout: 180 * SEC,
+    failOnNonZeroExit: false,
+  }).then((result) => {
+    const isSuccess = result.stdout.includes("Cleanup completed successfully!");
+    if (!isSuccess || result.exitCode !== 0) {
+      cy.log(
+        `WARNING: cleanupDependenciesData had issues (exit code: ${result.exitCode})`
+      );
+    }
+  });
+}
+
 export function getApplicationID(url: string): number | null {
   const urlObj = new URL(url);
   const activeItem = urlObj.searchParams.get("activeItem");
@@ -2267,22 +2458,29 @@ export function validateMtaVersionInCLI(expectedMtaVersion: string): void {
 export function validateTackleCr(): void {
   const namespace = getNamespace();
   const kubeCLI = getKubernetesCLI();
-  let tackleCr: any;
-  let command = `tackleCR=$(${kubeCLI} get tackle -n${namespace}|grep -vi name|cut -d ' ' -f 1);`;
-  command += `${kubeCLI} get tackle $tackleCr -n${namespace} -o json`;
+  const command = `${kubeCLI} get tackle -n${namespace} -o json`;
   getCommandOutput(command).then((result) => {
+    let tackleCr: any;
     try {
       tackleCr = JSON.parse(result.stdout);
     } catch {
       throw new Error("Failed to parse Tackle CR");
     }
-    const condition = tackleCr["items"][0]["status"]["conditions"][1];
-    const failures = condition["ansibleResult"]["failures"];
-    const type = condition["type"];
-    cy.log(`Failures: ${failures}`);
-    cy.log(`Condition type: ${type}`);
-    expect(failures).be.equal(0);
-    expect(type).be.equal("Running");
+    const conditions = tackleCr.items?.[0]?.status?.conditions;
+    expect(conditions, "Tackle CR conditions missing").to.be.an("array");
+
+    // Find the condition that has ansibleResult
+    const runningCondition = conditions.find(
+      (c: any) => c.type === "Running" && c.ansibleResult
+    );
+    expect(runningCondition, "ansibleResult condition missing").to.exist;
+    expect(
+      runningCondition!.status,
+      "Running condition status is not True"
+    ).to.equal("True");
+
+    const failures = runningCondition!.ansibleResult!.failures;
+    expect(failures, `Ansible failures detected: ${failures}`).to.eq(0);
   });
 }
 

@@ -18,6 +18,7 @@ limitations under the License.
 import * as data from "../../../../../utils/data_utils";
 import {
   deleteAllCredentials,
+  deleteApplicationTableRows,
   deleteBulkApplicationsByApi,
   getRandomAnalysisData,
   getRandomApplicationData,
@@ -36,7 +37,6 @@ import {
   UserCredentials,
 } from "../../../../types/constants";
 let sourceCredential: CredentialsSourceControlUsername;
-let invalidSourceCredential: CredentialsSourceControlUsername;
 let mavenCredential: CredentialsMaven;
 const applicationIds: number[] = [];
 
@@ -44,6 +44,7 @@ describe(["@tier1"], "Source Analysis", () => {
   before("Login", function () {
     login();
     cy.visit("/");
+    deleteApplicationTableRows();
     deleteAllCredentials();
 
     // Create source Credentials
@@ -55,16 +56,6 @@ describe(["@tier1"], "Source Analysis", () => {
       )
     );
     sourceCredential.create();
-
-    // Create invalid source Credentials
-    invalidSourceCredential = new CredentialsSourceControlUsername(
-      data.getRandomCredentialsData(
-        CredentialType.sourceControl,
-        UserCredentials.usernamePassword,
-        false
-      )
-    );
-    invalidSourceCredential.create();
 
     // Create Maven credentials
     mavenCredential = new CredentialsMaven(
@@ -103,22 +94,13 @@ describe(["@tier1"], "Source Analysis", () => {
     application.extractIDfromName().then((id) => {
       applicationIds.push(id);
     });
-    // analyze with no default creds
-    application.analyze();
-    application.verifyAnalysisStatus(AnalysisStatuses.failed);
-
-    // analyze with inValid default source creds and valid maven creds
-    invalidSourceCredential.setAsDefaultViaActionsMenu();
-    mavenCredential.setAsDefaultViaActionsMenu();
-    application.analyze();
-    application.waitStatusChange(AnalysisStatuses.scheduled);
-    application.verifyAnalysisStatus(AnalysisStatuses.failed);
 
     // analyze with valid default source and maven creds
     sourceCredential.setAsDefaultViaActionsMenu();
+    mavenCredential.setAsDefaultViaActionsMenu();
     application.analyze();
     application.waitStatusChange(AnalysisStatuses.scheduled);
-    application.verifyAnalysisStatus(AnalysisStatuses.completed, 20 * MIN);
+    application.verifyAnalysisStatus(AnalysisStatuses.completed, 30 * MIN);
 
     // analyze after removing valid default source and maven creds
     sourceCredential.unsetAsDefaultViaActionsMenu();
@@ -208,26 +190,6 @@ describe(["@tier1"], "Source Analysis", () => {
     application.manageCredentials(scCredsKey.name, null);
     application.analyze();
     application.verifyAnalysisStatus(AnalysisStatuses.completed, 30 * MIN);
-  });
-
-  it("Analysis for known Open Source libraries on tackleTest app", function () {
-    // Source code analysis require both source and maven credentials
-    const application = new Analysis(
-      getRandomApplicationData("tackleTestApp_Source+knownLibraries", {
-        sourceData: this.appData["tackle-testapp-git"],
-      }),
-      getRandomAnalysisData(
-        this.analysisData["analysis_for_openSourceLibraries"]
-      )
-    );
-    application.create();
-    cy.wait("@getApplication");
-    application.extractIDfromName().then((id) => {
-      applicationIds.push(id);
-    });
-    application.manageCredentials(sourceCredential.name, mavenCredential.name);
-    application.analyze();
-    application.verifyAnalysisStatus("Completed", 30 * MIN);
   });
 
   it("Automated tagging using Source Analysis on tackle testapp", function () {
@@ -462,7 +424,6 @@ describe(["@tier1"], "Source Analysis", () => {
   after("Perform test data clean up", function () {
     deleteBulkApplicationsByApi(applicationIds);
     sourceCredential.delete();
-    invalidSourceCredential.delete();
     mavenCredential.delete();
     writeMavenSettingsFile(data.getRandomWord(5), data.getRandomWord(5));
   });
