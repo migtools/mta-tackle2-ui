@@ -18,11 +18,14 @@ limitations under the License.
 import * as data from "../../../../utils/data_utils";
 import {
   createMultipleApplications,
+  deleteAllCredentials,
   deleteAllMigrationWaves,
   deleteApplicationTableRows,
+  getAuthHeaders,
   login,
 } from "../../../../utils/utils";
 import { JiraCredentials } from "../../../models/administration/credentials/JiraCredentials";
+import { Credentials } from "../../../models/administration/credentials/credentials";
 import { Jira } from "../../../models/administration/jira-connection/jira";
 import { JiraIssue } from "../../../models/administration/jira-connection/jira-api.interface";
 import { Application } from "../../../models/migration/applicationinventory/application";
@@ -54,7 +57,7 @@ let projectName = "";
  * The only difference is that this test doesn't remove/archive the issues created since the token doesn't have enough permissions
  */
 describe(
-  ["@tier2", "downstream"],
+  ["@tier2", "@tier2_B", "downstream"],
   "Export Migration Wave to Jira Datacenter",
   function () {
     before("Create test data", function () {
@@ -75,6 +78,7 @@ describe(
       cy.visit("/");
       deleteAllMigrationWaves();
       deleteApplicationTableRows();
+      deleteAllCredentials();
       jiraCredentials = new JiraCredentials(
         data.getJiraCredentialData(CredentialType.jiraToken, true)
       );
@@ -155,8 +159,7 @@ describe(
     after("Clear test data", function () {
       deleteAllMigrationWaves();
       deleteApplicationTableRows();
-      jiraInstance.delete();
-      jiraCredentials.delete();
+      deleteAllCredentials();
     });
   }
 );

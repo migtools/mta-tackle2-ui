@@ -59,7 +59,7 @@ import * as commonView from "../../../../views/common.view";
 let businessservicesList: Array<BusinessServices> = [];
 let stakeHoldersList: Stakeholders[];
 
-describe(["@tier2"], "Application validations", () => {
+describe(["@tier2", "@tier2_B"], "Application validations", () => {
   before("Login", function () {
     login();
     cy.visit("/");
@@ -172,7 +172,7 @@ describe(["@tier2"], "Application validations", () => {
     const application = new Application(getRandomApplicationData());
 
     // Create a new application
-    application.create();
+    application.create(false, true);
     cy.wait("@getApplication");
     checkSuccessAlert(
       commonView.successAlertMessage,

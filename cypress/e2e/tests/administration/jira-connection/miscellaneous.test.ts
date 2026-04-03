@@ -31,7 +31,7 @@ import { Application } from "../../../models/migration/applicationinventory/appl
 import { CredentialType, JiraType, button } from "../../../types/constants";
 import { JiraConnectionData } from "../../../types/types";
 
-describe(["@tier3"], "Jira connection negative tests", () => {
+describe(["@tier3", "@secretsNeeded"], "Jira connection negative tests", () => {
   const expectedToFail = true;
   const useTestingAccount = true;
   const isSecure = false;
@@ -93,7 +93,7 @@ describe(["@tier3"], "Jira connection negative tests", () => {
     cy.intercept("DELETE", "/hub/migrationwaves*/*").as("deleteWave");
   });
 
-  it("Bug MTA-2549: Validating error when Jira Cloud Instance is not connected", () => {
+  it("Validating error when Jira Cloud Instance is not connected", () => {
     /**
          Implements MTA-362 - Add JIRA instance with invalid credentials
          Automates https://issues.redhat.com/browse/MTA-991
@@ -110,7 +110,8 @@ describe(["@tier3"], "Jira connection negative tests", () => {
     });
   });
 
-  it("Bug MTA-2549: Validating error when Jira Stage Instance is not connected", () => {
+  it.skip("Bug Tackle-3116: Validating error when Jira Stage Instance is not connected", () => {
+    // https://github.com/konveyor/tackle2-ui/issues/3116
     /**
          Implements MTA-362 - Add JIRA instance with invalid credentials
          Automates https://issues.redhat.com/browse/MTA-991
