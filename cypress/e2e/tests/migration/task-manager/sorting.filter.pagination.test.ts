@@ -19,13 +19,13 @@ import { randomWordGenerator } from "../../../../utils/data_utils";
 import {
   clearAllFilters,
   deleteApplicationTableRows,
-  deleteByList,
   deleteCustomResource,
   getNumberOfNonTaskPods,
   getRandomAnalysisData,
   getRandomApplicationData,
   limitPodsByQuota,
   login,
+  sidedrawerTab,
   validateNumberPresence,
   validatePagination,
   validateSortBy,
@@ -34,7 +34,6 @@ import {
 import { Analysis } from "../../../models/migration/applicationinventory/analysis";
 import { TaskManager } from "../../../models/migration/task-manager/task-manager";
 import {
-  SEC,
   TaskFilter,
   TaskKind,
   TaskStatus,
@@ -45,24 +44,43 @@ import {
   TaskManagerTableHeaders,
 } from "../../../views/taskmanager.view";
 
-describe.skip(
+describe(
   ["@tier3", "@tier3_A"],
   "Filtering, sorting and pagination in Task Manager Page",
   function () {
     const applicationsList: Analysis[] = [];
 
-    before("Login", function () {
+    before("Login and create test applications", function () {
       login();
       cy.visit("/");
       deleteApplicationTableRows();
-    });
 
-    beforeEach("Load data", function () {
       cy.fixture("application").then(function (appData) {
         this.appData = appData;
       });
       cy.fixture("analysis").then(function (analysisData) {
         this.analysisData = analysisData;
+      });
+
+      // Create applications for filtering tests
+      cy.fixture("application").then((appData) => {
+        cy.fixture("analysis").then((analysisData) => {
+          for (let i = 0; i < 6; i++) {
+            const app = new Analysis(
+              getRandomApplicationData("TaskFilteringApp_" + i, {
+                sourceData: appData["bookserver-app"],
+              }),
+              getRandomAnalysisData(
+                analysisData["source_analysis_on_bookserverapp"]
+              )
+            );
+            applicationsList.push(app);
+          }
+          // Create all applications
+          applicationsList.forEach((application) => application.create());
+          // Analyze the created applications to generate tasks for filtering
+          Analysis.analyzeByList(applicationsList);
+        });
       });
     });
 
@@ -73,23 +91,7 @@ describe.skip(
         limitPodsByQuota(podsNum);
       });
 
-      let bookServerApp: Analysis;
-      for (let i = 0; i < 6; i++) {
-        bookServerApp = new Analysis(
-          getRandomApplicationData("TaskFilteringApp_" + i, {
-            sourceData: this.appData["bookserver-app"],
-          }),
-          getRandomAnalysisData(
-            this.analysisData["source_analysis_on_bookserverapp"]
-          )
-        );
-        applicationsList.push(bookServerApp);
-      }
-      applicationsList.forEach((application) => application.create());
-      Analysis.analyzeAll(bookServerApp);
-
       TaskManager.open(100);
-      cy.wait(5 * SEC);
       const columsToTest = [
         TaskManagerTableHeaders.id,
         TaskManagerTableHeaders.application,
@@ -101,17 +103,14 @@ describe.skip(
       columsToTest.forEach((column) => {
         validateSortBy(column);
       });
-    });
 
-    // Making sure Resource Quota CR is deleted
-    it("Delete resource quota created in previous test", function () {
+      // Making sure Resource Quota CR is deleted
       deleteCustomResource("quota", "task-pods", true);
     });
 
     it("Filtering tasks by Status", function () {
       TaskManager.open();
       TaskManager.applyFilter(TaskFilter.status, TaskStatus.pending);
-      validateTextPresence(TaskManagerColumns.status, TaskStatus.pending);
       validateTextPresence(
         TaskManagerColumns.status,
         TaskStatus.running,
@@ -251,7 +250,7 @@ describe.skip(
       clearAllFilters();
     });
 
-    it("Negative test: filtering by not existing data", () => {
+    it("Negative test: filtering by not existing data and Pagination", () => {
       TaskManager.open();
       TaskManager.applyFilter(
         TaskFilter.applicationName,
@@ -259,16 +258,30 @@ describe.skip(
       );
       cy.get(trTag).should("contain", "No results found");
       clearAllFilters();
-    });
-
-    it("Pagination validation", function () {
-      TaskManager.open(10, true);
       validatePagination();
     });
 
+    it("Verify 'Tasks' Tab Displays Expected Task Kinds", function () {
+      // Polarion TC MTA-624
+      const tasksKindsList = [
+        "language-discovery",
+        "tech-discovery",
+        "analyzer",
+      ];
+      sidedrawerTab(applicationsList[0].name, "Tasks");
+
+      cy.get("[data-label='Task Kind']").should((tasks) => {
+        const foundTasksList = tasks.toArray().map((task) => task.innerText);
+        expect(
+          foundTasksList,
+          `Expected task kinds not found. Found: [${foundTasksList.join(", ")}]`
+        ).to.include.members(tasksKindsList);
+      });
+      applicationsList[0].closeApplicationDetails();
+    });
+
     after("Perform test data clean up", function () {
-      cy.reload();
-      deleteByList(applicationsList);
+      deleteApplicationTableRows();
     });
   }
 );

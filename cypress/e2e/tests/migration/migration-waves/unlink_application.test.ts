@@ -16,7 +16,14 @@ limitations under the License.
 /// <reference types="cypress" />
 
 import * as data from "../../../../utils/data_utils";
-import { createMultipleApplications, login } from "../../../../utils/utils";
+import {
+  deleteAllCredentials,
+  deleteAllJiraConnections,
+  deleteAllMigrationWaves,
+  deleteApplicationTableRows,
+  getAuthHeaders,
+  login,
+} from "../../../../utils/utils";
 import { JiraCredentials } from "../../../models/administration/credentials/JiraCredentials";
 import { Jira } from "../../../models/administration/jira-connection/jira";
 import {
@@ -51,7 +58,7 @@ let migrationWave: MigrationWave;
 let projectName = "";
 
 describe(
-  ["@tier3"],
+  ["@tier3", "@tier3_secretsNeeded"],
   "Unlink application from exported migration waves",
   function () {
     before("Create test data", function () {
@@ -71,6 +78,9 @@ describe(
       }
       login();
       cy.visit("/");
+      deleteApplicationTableRows();
+
+      // Create Jira credentials and instance via UI
       jiraCloudCredentials = new JiraCredentials(
         data.getJiraCredentialData(CredentialType.jiraBasic, true)
       );
@@ -86,16 +96,33 @@ describe(
       );
       jiraCloudInstance.create();
 
-      applications.push(...createMultipleApplications(2));
-      migrationWave = new MigrationWave(
-        data.getRandomWord(8),
-        now,
-        end,
-        null,
-        null,
-        applications
-      );
-      migrationWave.create();
+      getAuthHeaders().then((headers) => {
+        Application.createMultipleViaApi(
+          2,
+          undefined,
+          undefined,
+          undefined,
+          headers
+        )
+          .then((apps) => {
+            applications.push(...apps);
+            // Create migration wave via API with application IDs
+            const applicationIds = applications.map((app) => app.id);
+            return MigrationWave.createViaApi(
+              data.getRandomWord(8),
+              now,
+              end,
+              undefined,
+              undefined,
+              applicationIds,
+              headers
+            );
+          })
+          .then((wave) => {
+            migrationWave = wave;
+            migrationWave.applications = applications;
+          });
+      });
     });
 
     // Automates Polarion TC 414
@@ -135,18 +162,14 @@ describe(
       });
     });
 
-    afterEach("Clear state", function () {
-      Application.open(true);
-    });
-
     after("Clear test data", function () {
       jiraCloudInstance.getIssues(projectName).then((issues: JiraIssue[]) => {
         jiraCloudInstance.deleteIssues(issues.map((issue) => issue.id));
       });
-      migrationWave.delete();
-      applications.forEach((app) => app.delete());
-      jiraCloudInstance.delete();
-      jiraCloudCredentials.delete();
+      deleteAllJiraConnections();
+      deleteAllMigrationWaves();
+      deleteApplicationTableRows();
+      deleteAllCredentials();
     });
   }
 );
