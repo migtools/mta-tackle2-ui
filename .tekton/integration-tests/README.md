@@ -21,19 +21,25 @@ We use a custom pipeline instead of Konflux's built-in `deploy-fbc-operator` pip
 ## Pipeline Steps
 
 ### 1. parse-metadata
+
 Extracts the FBC image reference from the Konflux snapshot.
 
 ### 2. provision-eaas-space
+
 Creates an isolated namespace in the EaaS management cluster.
 
 ### 3. provision-cluster
+
 Provisions an ephemeral Hypershift cluster with:
+
 - OpenShift version: 4.17.0
 - Instance type: m5.xlarge
 - Registry mirroring: `registry.redhat.io` → `registry.stage.redhat.io`
 
 ### 4. deploy-operator
+
 Installs and configures the MTA operator:
+
 - Creates CatalogSource from FBC snapshot image
 - Subscribes to `mta-operator` (channel: `stable-v8.1`)
 - Creates Tackle CR with resource limits
@@ -41,7 +47,9 @@ Installs and configures the MTA operator:
 - Retrieves MTA UI route and Keycloak credentials
 
 ### 5. run-e2e-tests
+
 Runs Cypress login test:
+
 - Clones `migtools/mta-tackle2-ui` repository
 - Executes `e2e/tests/login.test.ts` against deployed MTA instance
 - Validates authentication flow and UI accessibility
@@ -68,6 +76,7 @@ Stage registry credentials (`registry.stage.redhat.io`) are provisioned automati
 Tests run from `migtools/mta-tackle2-ui` repository (release-0.9 branch).
 
 The repository contains:
+
 - Cypress E2E test suite in `cypress/` directory
 - Test configuration and environment setup
 - Default test credentials in `.env.example`
