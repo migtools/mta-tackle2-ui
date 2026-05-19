@@ -8,7 +8,7 @@ This custom integration test pipeline validates MTA operator deployments using F
 
 1. **Provision ephemeral cluster** - Creates a temporary Hypershift cluster on AWS via EaaS
 2. **Deploy operator from FBC** - Installs MTA operator using the FBC catalog image from the snapshot
-3. **Run E2E tests** - Executes Cypress login test to validate the deployment
+3. **Run E2E tests** - Executes full Cypress test suite (all tiers) to validate the deployment
 
 ## Why Custom Pipeline
 
@@ -48,11 +48,12 @@ Installs and configures the MTA operator:
 
 ### 5. run-e2e-tests
 
-Runs Cypress login test:
+Runs full Cypress test suite:
 
 - Clones `migtools/mta-tackle2-ui` repository
-- Executes `e2e/tests/login.test.ts` against deployed MTA instance
-- Validates authentication flow and UI accessibility
+- Executes all E2E tests (all tiers: @ci, @tier0, @tier2, @tier3) against deployed MTA instance
+- Validates authentication, UI functionality, and end-to-end workflows
+- Excludes Cloud Foundry and downstream-specific tests
 
 ## Configuration
 
@@ -60,7 +61,7 @@ Runs Cypress login test:
 - **Operator channel:** `stable-v8.1`
 - **Cluster version:** OpenShift 4.17.0
 - **Instance type:** m5.xlarge
-- **Total runtime:** ~20-30 minutes
+- **Total runtime:** ~60-90 minutes (cluster provisioning + operator deployment + full test suite)
 
 ## Registry Credentials
 

@@ -394,15 +394,22 @@ spec:
               npm clean-install --ignore-scripts --no-audit
               npx cypress install
 
-              echo "Running login test only..."
+              echo "Running all E2E tests (nightly test suite)..."
               cd cypress
               cp .env.example .env
 
               export CYPRESS_BASE_URL="$BASE_URL"
               export CYPRESS_KEYCLOAK_ADMIN_PASSWORD="$KEYCLOAK_PASS"
+              export CYPRESS_INCLUDE_TAGS="@ci,@tier0,@tier2_A,@tier2_B,@tier2_secretsNeeded,@tier3_A,@tier3_B,@tier3_C,@tier3_D,@tier3_E,@tier3_F,@tier3_secretsNeeded"
+              export CYPRESS_EXCLUDE_TAGS="cf,downstream"
+
+              # Build spec from tags (file-level filter)
+              TEST_TAGS="@ci,@tier0,@tier2_A,@tier2_B,@tier2_secretsNeeded,@tier3_A,@tier3_B,@tier3_C,@tier3_D,@tier3_E,@tier3_F,@tier3_secretsNeeded"
+              SPEC=$(node scripts/findTierFiles.mjs ${TEST_TAGS})
+              echo "Running tests from files: $SPEC"
 
               if npx dotenvx run -- npx cypress run \
-                --spec "e2e/tests/login.test.ts" \
+                --spec "$SPEC" \
                 --config-file cypress.config.ts; then
                 echo "PASSED" > $(results.testStatus.path)
               else
