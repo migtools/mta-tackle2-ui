@@ -85,6 +85,8 @@ spec:
                 value: "4.17.0"
               - name: instanceType
                 value: "m5.xlarge"
+              - name: timeout
+                value: "4h"
               - name: imageContentSources
                 value: |
                   - source: registry.redhat.io
@@ -366,6 +368,10 @@ spec:
         results:
           - name: testStatus
             description: Test execution status (PASSED or FAILED)
+          - name: testSummary
+            description: Test summary (Total, Passing, Failing, Duration)
+          - name: failedTests
+            description: List of failed test file names
         steps:
           - name: run-tests
             image: cypress/included:15.7.0
@@ -408,9 +414,86 @@ spec:
               SPEC=$(node scripts/findTierFiles.mjs ${TEST_TAGS})
               echo "Running tests from files: $SPEC"
 
-              if npx dotenvx run -- npx cypress run \
+              # Run tests and capture exit code
+              set +e
+              npx dotenvx run -- npx cypress run \
                 --spec "$SPEC" \
-                --config-file cypress.config.ts; then
+                --config-file cypress.config.ts
+              TEST_EXIT_CODE=$?
+              set -e
+
+              # Parse mochawesome reports to generate summary
+              REPORT_DIR="run/report/.jsons"
+              if [ -d "$REPORT_DIR" ] && [ -n "$(ls -A $REPORT_DIR/*.json 2>/dev/null)" ]; then
+                echo "Generating test summary from mochawesome reports..."
+
+                # Use node to parse JSON reports
+                SUMMARY=$(node -e "
+                  const fs = require('fs');
+                  const path = require('path');
+                  const reportDir = '$REPORT_DIR';
+
+                  let totalTests = 0;
+                  let totalPasses = 0;
+                  let totalFailures = 0;
+                  let totalPending = 0;
+                  let totalSkipped = 0;
+                  let failedSpecs = [];
+
+                  const files = fs.readdirSync(reportDir).filter(f => f.endsWith('.json'));
+                  files.forEach(file => {
+                    try {
+                      const report = JSON.parse(fs.readFileSync(path.join(reportDir, file), 'utf8'));
+                      if (report.stats) {
+                        totalTests += report.stats.tests || 0;
+                        totalPasses += report.stats.passes || 0;
+                        totalFailures += report.stats.failures || 0;
+                        totalPending += report.stats.pending || 0;
+                        totalSkipped += report.stats.skipped || 0;
+
+                        if (report.stats.failures > 0 && report.results && report.results[0]) {
+                          failedSpecs.push(report.results[0].file);
+                        }
+                      }
+                    } catch (e) {}
+                  });
+
+                  console.log(JSON.stringify({
+                    total: totalTests,
+                    passing: totalPasses,
+                    failing: totalFailures,
+                    pending: totalPending,
+                    skipped: totalSkipped,
+                    failedSpecs: failedSpecs
+                  }));
+                ")
+
+                TOTAL=$(echo "$SUMMARY" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf-8')).total)")
+                PASSING=$(echo "$SUMMARY" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf-8')).passing)")
+                FAILING=$(echo "$SUMMARY" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf-8')).failing)")
+                FAILED_SPECS=$(echo "$SUMMARY" | node -e "console.log(JSON.parse(require('fs').readFileSync(0, 'utf-8')).failedSpecs.join(', '))")
+
+                echo "Total: $TOTAL, Passing: $PASSING, Failing: $FAILING" > $(results.testSummary.path)
+                echo "$FAILED_SPECS" > $(results.failedTests.path)
+
+                echo "========================================="
+                echo "Test Summary:"
+                echo "  Total Tests: $TOTAL"
+                echo "  Passing: $PASSING"
+                echo "  Failing: $FAILING"
+                echo "========================================="
+                if [ -n "$FAILED_SPECS" ]; then
+                  echo "Failed Test Files:"
+                  echo "$FAILED_SPECS" | tr ',' '\n'
+                  echo "========================================="
+                fi
+              else
+                echo "No test reports found" > $(results.testSummary.path)
+                echo "N/A" > $(results.failedTests.path)
+              fi
+
+              # Set final status
+              if [ $TEST_EXIT_CODE -eq 0 ]; then
                 echo "PASSED" > $(results.testStatus.path)
               else
                 echo "FAILED" > $(results.testStatus.path)
