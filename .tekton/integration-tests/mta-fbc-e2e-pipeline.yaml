@@ -391,6 +391,11 @@ spec:
 
               echo "MTA UI: $BASE_URL"
 
+              echo "Installing required test dependencies (curl, jq)..."
+              apt-get update && \
+                apt-get install -y curl jq && \
+                rm -rf /var/lib/apt/lists/*
+
               echo "Cloning mta-tackle2-ui repository..."
               cd /tmp
               git clone --depth 1 --branch release-0.9 https://github.com/migtools/mta-tackle2-ui.git
