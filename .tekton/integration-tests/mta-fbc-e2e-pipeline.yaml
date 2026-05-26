@@ -380,6 +380,8 @@ spec:
                 value: /tmp/.cache/Cypress
               - name: npm_config_cache
                 value: /tmp/.cache/npm
+              - name: ELECTRON_EXTRA_LAUNCH_ARGS
+                value: "--disable-dev-shm-usage --no-sandbox"
             script: |
               #!/bin/bash
               set -euo pipefail
