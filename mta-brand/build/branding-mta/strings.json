@@ -12,7 +12,7 @@
     "leftTitle": {
       "text": "Migration Toolkit for Applications",
       "heading": "h1",
-      "size": "2xl"
+      "size": "xl"
     },
     "rightBrand": {
       "src": "<%= brandingRoot %>/images/redhat-logo.svg",
