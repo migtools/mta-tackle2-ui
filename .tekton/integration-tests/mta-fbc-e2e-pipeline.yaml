@@ -50,7 +50,7 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: use_ocpctl_clusters
           - name: pathInRepo
             value: .tekton/tasks/ocpctl-provision.yaml
 
@@ -68,7 +68,7 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: use_ocpctl_clusters
           - name: pathInRepo
             value: .tekton/tasks/deploy-mta-operator.yaml
 
@@ -142,6 +142,6 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: use_ocpctl_clusters
           - name: pathInRepo
             value: .tekton/tasks/ocpctl-cleanup.yaml
