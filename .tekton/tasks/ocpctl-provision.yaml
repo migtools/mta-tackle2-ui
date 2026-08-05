@@ -16,7 +16,7 @@ spec:
   params:
     - name: clusterName
       type: string
-      description: Name for the new cluster
+      description: Name or UID seed for the cluster (auto-truncated to fit OCPCTL 21-char limit)
     - name: profile
       type: string
       default: "aws-sno-ga"
@@ -78,7 +78,8 @@ spec:
         set -euo pipefail
 
         OCPCTL_URL="$(params.ocpctlUrl)"
-        CLUSTER_NAME="$(params.clusterName)"
+        RAW_NAME="$(params.clusterName)"
+        CLUSTER_NAME="mta-$(echo "$RAW_NAME" | tr -d '-' | head -c 13)"
 
         echo "Creating OCPCTL cluster: $CLUSTER_NAME"
         echo "  profile=$(params.profile) version=$(params.version) region=$(params.region)"

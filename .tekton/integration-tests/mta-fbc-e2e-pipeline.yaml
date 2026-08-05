@@ -43,7 +43,7 @@ spec:
         - parse-metadata
       params:
         - name: clusterName
-          value: "mta-e2e-$(context.pipelineRun.uid)"
+          value: "$(context.pipelineRun.uid)"
       taskRef:
         resolver: git
         params:
