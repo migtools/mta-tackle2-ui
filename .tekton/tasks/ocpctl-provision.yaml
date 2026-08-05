@@ -23,7 +23,7 @@ spec:
       description: OCPCTL cluster profile
     - name: version
       type: string
-      default: "4.17"
+      default: "4.21"
       description: OpenShift version
     - name: region
       type: string
