@@ -136,6 +136,8 @@ spec:
       params:
         - name: clusterId
           value: $(tasks.provision-cluster.results.clusterId)
+        - name: clusterName
+          value: "$(context.pipelineRun.uid)"
       taskRef:
         resolver: git
         params:

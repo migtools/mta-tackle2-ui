@@ -96,7 +96,7 @@ spec:
         echo "✅ Kubeconfig saved"
 
     - name: configure-registry-mirror
-      image: quay.io/openshift/origin-cli@sha256:c9b8b7c808abfb959dd4b0545407fcd8436d6b2ebe9636053e90d3293a81b5a9
+      image: quay.io/openshift/origin-cli@sha256:fdec30b0317646e45db91b107920ad0cab67642ff220b1ed1f7df78a846b9fe0
       volumeMounts:
         - name: credentials
           mountPath: /credentials
@@ -131,7 +131,7 @@ spec:
         sleep 30
 
     - name: install-operator
-      image: quay.io/openshift/origin-cli@sha256:c9b8b7c808abfb959dd4b0545407fcd8436d6b2ebe9636053e90d3293a81b5a9
+      image: quay.io/openshift/origin-cli@sha256:fdec30b0317646e45db91b107920ad0cab67642ff220b1ed1f7df78a846b9fe0
       volumeMounts:
         - name: credentials
           mountPath: /credentials
