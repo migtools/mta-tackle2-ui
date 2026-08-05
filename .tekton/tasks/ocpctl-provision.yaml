@@ -124,13 +124,12 @@ spec:
             secretKeyRef:
               name: $(params.ocpctlSecretName)
               key: api-key
-        - name: CLUSTER_ID
-          value: $(steps.create-cluster.results.clusterId)
       script: |
         #!/bin/bash
         set -euo pipefail
 
         OCPCTL_URL="$(params.ocpctlUrl)"
+        CLUSTER_ID=$(cat $(results.clusterId.path))
         TIMEOUT=$(params.waitTimeout)
         INTERVAL=30
         ELAPSED=0
