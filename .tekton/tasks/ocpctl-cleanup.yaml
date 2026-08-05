@@ -1,0 +1,104 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: ocpctl-cleanup
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/categories: Deployment
+    tekton.dev/tags: ocpctl,openshift,cluster,cleanup
+    tekton.dev/displayName: "OCPCTL Cleanup Cluster"
+spec:
+  description: >-
+    Delete an OCPCTL cluster and wait until it reaches DESTROYED status.
+    Designed for use as a finally task — does not fail the pipeline on errors.
+
+  params:
+    - name: clusterId
+      type: string
+      description: UUID of the cluster to delete
+    - name: ocpctlUrl
+      type: string
+      default: "https://ocpctl.mg.dog8code.com/api/v1"
+      description: OCPCTL API base URL
+    - name: waitTimeout
+      type: string
+      default: "1800"
+      description: Timeout in seconds waiting for DESTROYED status
+    - name: ocpctlSecretName
+      type: string
+      default: "ocpctl-api-key"
+      description: Name of the Kubernetes Secret containing the OCPCTL API key
+
+  steps:
+    - name: delete-cluster
+      image: registry.access.redhat.com/ubi9/ubi-minimal@sha256:b87097994fec391e6d6abdb8a3f9e14c09192683b3489c929f8298bce3f3afbe
+      env:
+        - name: OCPCTL_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: $(params.ocpctlSecretName)
+              key: api-key
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        OCPCTL_URL="$(params.ocpctlUrl)"
+        CLUSTER_ID="$(params.clusterId)"
+
+        if [ -z "$CLUSTER_ID" ]; then
+          echo "No cluster ID provided, skipping cleanup"
+          exit 0
+        fi
+
+        echo "Deleting OCPCTL cluster $CLUSTER_ID..."
+
+        HTTP_CODE=$(curl -s -o /tmp/delete-response.json -w "%{http_code}" \
+          -X DELETE "$OCPCTL_URL/clusters/$CLUSTER_ID" \
+          -H "Authorization: Bearer $OCPCTL_API_KEY")
+
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "⚠️  Delete request returned HTTP $HTTP_CODE"
+          cat /tmp/delete-response.json
+          exit 0
+        fi
+
+        echo "Delete request accepted. Waiting for DESTROYED status..."
+
+        TIMEOUT=$(params.waitTimeout)
+        INTERVAL=30
+        ELAPSED=0
+
+        while true; do
+          RESPONSE=$(curl -s \
+            -H "Authorization: Bearer $OCPCTL_API_KEY" \
+            "$OCPCTL_URL/clusters/$CLUSTER_ID")
+
+          STATUS=$(echo "$RESPONSE" | python3 -c "
+        import sys, json
+        data = json.load(sys.stdin)
+        cluster = data.get('cluster', data)
+        print(cluster.get('status', 'UNKNOWN').upper())
+        " 2>/dev/null || echo "UNKNOWN")
+
+          echo "Status: $STATUS ($ELAPSED/${TIMEOUT}s)"
+
+          if [ "$STATUS" = "DESTROYED" ]; then
+            echo "✅ Cluster destroyed"
+            exit 0
+          fi
+
+          if [ "$STATUS" = "DESTROY_FAILED" ]; then
+            echo "⚠️  Cluster destroy failed — manual cleanup may be needed"
+            exit 0
+          fi
+
+          if [ $ELAPSED -ge $TIMEOUT ]; then
+            echo "⚠️  Timed out waiting for cluster destruction — manual cleanup may be needed"
+            exit 0
+          fi
+
+          sleep $INTERVAL
+          ELAPSED=$((ELAPSED + INTERVAL))
+        done
