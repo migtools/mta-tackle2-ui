@@ -78,12 +78,9 @@ spec:
       params:
         - name: uiRoute
           value: $(tasks.deploy-operator.results.uiRoute)
-        - name: keycloakPassword
-          value: $(tasks.deploy-operator.results.keycloakPassword)
       taskSpec:
         params:
           - name: uiRoute
-          - name: keycloakPassword
         results:
           - name: testStatus
             description: Test execution status (PASSED or FAILED)
@@ -95,18 +92,24 @@ spec:
                 value: /tmp/.cache/Cypress
               - name: npm_config_cache
                 value: /tmp/.cache/npm
+              - name: NODE_TLS_REJECT_UNAUTHORIZED
+                value: "0"
             script: |
               #!/bin/bash
               set -euo pipefail
               trap 'echo "FAILED" > $(results.testStatus.path)' ERR
 
               UI_ROUTE="$(params.uiRoute)"
-              KEYCLOAK_PASS="$(params.keycloakPassword)"
               BASE_URL="https://${UI_ROUTE}"
 
-              echo "MTA UI: $BASE_URL"
+              echo "=========== DEBUG INFO ==========="
+              echo "MTA UI URL: $BASE_URL"
+              echo "NODE_TLS_REJECT_UNAUTHORIZED=$NODE_TLS_REJECT_UNAUTHORIZED"
 
-              echo "Cloning mta-tackle2-ui repository..."
+              echo "Checking MTA UI reachability..."
+              curl -sk -o /dev/null -w "HTTP %{http_code} (%{time_total}s)\n" "$BASE_URL" || echo "WARNING: UI not reachable"
+
+              echo "Cloning tackle2-ui repository..."
               cd /tmp
               git clone --depth 1 --branch main https://github.com/migtools/mta-tackle2-ui.git
               cd mta-tackle2-ui
@@ -115,18 +118,26 @@ spec:
               npm clean-install --ignore-scripts --no-audit
               npx cypress install
 
-              echo "Running login test only..."
               cd cypress
               cp .env.example .env
-
-              export CYPRESS_BASE_URL="$BASE_URL"
-              export CYPRESS_KEYCLOAK_ADMIN_PASSWORD="$KEYCLOAK_PASS"
+              echo "=== .env contents ==="
+              cat .env
+              echo "====================="
 
               if npx dotenvx run -- npx cypress run \
                 --spec "e2e/tests/login.test.ts" \
-                --config-file cypress.config.ts; then
+                --config-file cypress.config.ts \
+                --config baseUrl="$BASE_URL",chromeWebSecurity=false; then
                 echo "PASSED" > $(results.testStatus.path)
               else
+                echo "=========== TEST FAILURE DEBUG ==========="
+                echo "Screenshots:"
+                find /tmp/mta-tackle2-ui/cypress/run/screenshots -type f 2>/dev/null && echo "" || echo "  None found"
+                echo "JUnit reports:"
+                cat /tmp/mta-tackle2-ui/cypress/run/report/junit/*.xml 2>/dev/null || echo "  None found"
+                echo "Mochawesome JSON:"
+                cat /tmp/mta-tackle2-ui/cypress/run/report/.jsons/*.json 2>/dev/null || echo "  None found"
+                echo "========================================="
                 echo "FAILED" > $(results.testStatus.path)
                 exit 1
               fi
