@@ -51,7 +51,7 @@ spec:
       description: OCPCTL API base URL
     - name: waitTimeout
       type: string
-      default: "3600"
+      default: "5400"
       description: Timeout in seconds waiting for READY status
     - name: ocpctlSecretName
       type: string
