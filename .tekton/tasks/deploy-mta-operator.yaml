@@ -277,6 +277,7 @@ spec:
           provider_nodejs_container_requests_memory: 512Mi
           hub_bucket_volume_size: "25Gi"
           cache_data_volume_size: "25Gi"
+          feature_auth_required: "true"
         EOF
 
         echo "Waiting for MTA UI deployment to be created..."
