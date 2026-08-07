@@ -106,6 +106,9 @@ spec:
               echo "MTA UI URL: $BASE_URL"
               echo "NODE_TLS_REJECT_UNAUTHORIZED=$NODE_TLS_REJECT_UNAUTHORIZED"
 
+              echo "Installing curl..."
+              apt-get update -qq && apt-get install -y -qq curl > /dev/null 2>&1 || echo "WARNING: could not install curl"
+
               echo "Checking MTA UI reachability..."
               curl -sk -o /dev/null -w "HTTP %{http_code} (%{time_total}s)\n" "$BASE_URL" || echo "WARNING: UI not reachable"
 
@@ -131,9 +134,9 @@ spec:
               echo "====================="
 
               echo "=== Cypress env debug ==="
-              echo "CYPRESS_USER=$CYPRESS_USER"
+              echo "CYPRESS_USER=${CYPRESS_USER:-<not set>}"
               echo "CYPRESS_PASSWORD is set: $([ -n "${CYPRESS_PASSWORD:-}" ] && echo 'yes' || echo 'no')"
-              echo "CYPRESS_BASE_URL=$CYPRESS_BASE_URL"
+              echo "CYPRESS_BASE_URL=${CYPRESS_BASE_URL:-<not set>}"
               echo "========================="
 
               if DEBUG=cypress:server:* npx dotenvx run -- npx cypress run \
