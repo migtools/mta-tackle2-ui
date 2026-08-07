@@ -28,7 +28,7 @@ spec:
       description: Operator package name
     - name: channelName
       type: string
-      default: "stable-v8.1"
+      default: "stable-v8.2"
       description: OLM subscription channel
     - name: operatorNamespace
       type: string
