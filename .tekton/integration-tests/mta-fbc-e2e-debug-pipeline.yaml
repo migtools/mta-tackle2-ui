@@ -1,0 +1,151 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: mta-fbc-e2e-debug-pipeline
+spec:
+  description: |
+    Debug pipeline: deploy MTA operator and run E2E tests on a PRE-EXISTING cluster.
+    Skips cluster provisioning and cleanup for fast iteration.
+    Update CLUSTER_ID default below with your cluster UUID.
+
+  params:
+    - name: SNAPSHOT
+      description: Application Snapshot JSON
+      type: string
+    - name: CLUSTER_ID
+      description: Pre-existing OCPCTL cluster UUID
+      type: string
+      default: "228c596b-7fa3-4102-ac04-b6d764d8ef81"
+
+  results:
+    - name: DEPLOYMENT_STATUS
+      description: Operator deployment status
+      value: $(tasks.deploy-operator.results.deploymentStatus)
+    - name: TEST_OUTPUT
+      description: Test execution result
+      value: $(tasks.run-e2e-tests.results.testStatus)
+
+  tasks:
+    - name: parse-metadata
+      params:
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/konflux-ci/integration-examples
+          - name: revision
+            value: a1a70b0a1cfc96f5216d472fbd60f6b42780b3e5
+          - name: pathInRepo
+            value: tasks/test_metadata.yaml
+
+    - name: deploy-operator
+      runAfter:
+        - parse-metadata
+      params:
+        - name: clusterId
+          value: $(params.CLUSTER_ID)
+        - name: fbcImage
+          value: $(tasks.parse-metadata.results.component-container-image)
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/migtools/mta-tackle2-ui
+          - name: revision
+            value: use_ocpctl_clusters
+          - name: pathInRepo
+            value: .tekton/tasks/deploy-mta-operator.yaml
+
+    - name: run-e2e-tests
+      runAfter:
+        - deploy-operator
+      params:
+        - name: uiRoute
+          value: $(tasks.deploy-operator.results.uiRoute)
+      taskSpec:
+        params:
+          - name: uiRoute
+        results:
+          - name: testStatus
+            description: Test execution status (PASSED or FAILED)
+        steps:
+          - name: run-tests
+            image: cypress/included:15.7.0
+            env:
+              - name: CYPRESS_CACHE_FOLDER
+                value: /tmp/.cache/Cypress
+              - name: npm_config_cache
+                value: /tmp/.cache/npm
+              - name: NODE_TLS_REJECT_UNAUTHORIZED
+                value: "0"
+            script: |
+              #!/bin/bash
+              set -euo pipefail
+              trap 'echo "FAILED" > $(results.testStatus.path)' ERR
+
+              UI_ROUTE="$(params.uiRoute)"
+              BASE_URL="https://${UI_ROUTE}"
+
+              echo "=========== DEBUG INFO ==========="
+              echo "MTA UI URL: $BASE_URL"
+              echo "NODE_TLS_REJECT_UNAUTHORIZED=$NODE_TLS_REJECT_UNAUTHORIZED"
+
+              echo "Installing curl..."
+              apt-get update -qq && apt-get install -y -qq curl > /dev/null 2>&1 || echo "WARNING: could not install curl"
+
+              echo "Checking MTA UI reachability..."
+              curl -sk -o /dev/null -w "HTTP %{http_code} (%{time_total}s)\n" "$BASE_URL" || echo "WARNING: UI not reachable"
+
+              echo "Checking MTA UI page content..."
+              curl -sk "$BASE_URL" 2>/dev/null | head -50
+              echo ""
+              echo "Following redirects..."
+              curl -sk -L -o /dev/null -w "Final URL: %{url_effective}\nHTTP %{http_code}\n" "$BASE_URL" || echo "WARNING: redirect check failed"
+
+              echo "Cloning tackle2-ui repository..."
+              cd /tmp
+              git clone --depth 1 --branch main https://github.com/migtools/mta-tackle2-ui.git
+              cd mta-tackle2-ui
+
+              echo "Installing dependencies..."
+              npm clean-install --ignore-scripts --no-audit
+              npx cypress install
+
+              cd cypress
+              cp .env.example .env
+              echo "=== .env contents ==="
+              cat .env
+              echo "====================="
+
+              echo "=== Cypress env debug ==="
+              echo "CYPRESS_USER=${CYPRESS_USER:-<not set>}"
+              echo "CYPRESS_PASSWORD is set: $([ -n "${CYPRESS_PASSWORD:-}" ] && echo 'yes' || echo 'no')"
+              echo "CYPRESS_BASE_URL=${CYPRESS_BASE_URL:-<not set>}"
+              echo "========================="
+
+              if DEBUG=cypress:server:* npx dotenvx run -- npx cypress run \
+                --spec "e2e/tests/login.test.ts" \
+                --config-file cypress.config.ts \
+                --config baseUrl="$BASE_URL",chromeWebSecurity=false,video=true; then
+                echo "PASSED" > $(results.testStatus.path)
+              else
+                echo "=========== TEST FAILURE DEBUG ==========="
+                echo "Screenshots (base64-encoded):"
+                find /tmp/mta-tackle2-ui/cypress/run/screenshots -type f -name "*.png" 2>/dev/null | while read f; do
+                  echo "--- FILE: $f ---"
+                  base64 -w0 "$f" 2>/dev/null || echo "  Failed to encode"
+                  echo ""
+                  echo "--- END FILE ---"
+                done
+                echo "JUnit reports:"
+                cat /tmp/mta-tackle2-ui/cypress/run/report/junit/*.xml 2>/dev/null || echo "  None found"
+                echo "Mochawesome JSON:"
+                cat /tmp/mta-tackle2-ui/cypress/run/report/.jsons/*.json 2>/dev/null || echo "  None found"
+                echo "Page source at time of failure:"
+                curl -sk "$BASE_URL" 2>/dev/null | head -100 || echo "  Could not fetch page"
+                echo "========================================="
+                echo "FAILED" > $(results.testStatus.path)
+                exit 1
+              fi

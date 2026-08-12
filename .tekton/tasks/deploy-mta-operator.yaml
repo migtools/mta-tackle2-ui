@@ -125,8 +125,9 @@ spec:
         EOF
 
         echo "✅ ImageDigestMirrorSet applied"
-        echo "Waiting for MachineConfigPool to start updating..."
-        sleep 30
+        echo "Waiting for MachineConfigPool to finish updating..."
+        oc wait mcp master --for=condition=Updated --timeout=600s
+        echo "✅ MachineConfigPool updated"
 
     - name: install-operator
       image: quay.io/openshift/origin-cli:4.21
@@ -147,6 +148,15 @@ spec:
         NAMESPACE="$(params.operatorNamespace)"
 
         oc create namespace "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -
+
+        echo "Cleaning up previous installation (if any)..."
+        oc delete tackle mta -n "$NAMESPACE" --ignore-not-found --timeout=120s 2>/dev/null || true
+        oc delete subscription mta-operator -n "$NAMESPACE" --ignore-not-found 2>/dev/null || true
+        oc get csv -n "$NAMESPACE" -o name 2>/dev/null | xargs -r oc delete -n "$NAMESPACE" --ignore-not-found 2>/dev/null || true
+        oc delete catalogsource mta-konflux-catalog -n openshift-marketplace --ignore-not-found 2>/dev/null || true
+        oc delete operatorgroup mta-operator-group -n "$NAMESPACE" --ignore-not-found 2>/dev/null || true
+        sleep 10
+        echo "✅ Previous installation cleaned up"
 
         cat <<EOF | oc apply -f -
         apiVersion: operators.coreos.com/v1alpha1
