@@ -46,6 +46,10 @@ spec:
       type: string
       default: "ocpctl-api-key"
       description: Name of the Kubernetes Secret containing the OCPCTL API key
+    - name: registryPullSecretName
+      type: string
+      default: "registry-pull-secrets"
+      description: Name of the Kubernetes Secret containing stage registry pull credentials
 
   results:
     - name: deploymentStatus
@@ -58,6 +62,9 @@ spec:
   volumes:
     - name: credentials
       emptyDir: {}
+    - name: stage-pull-secret
+      secret:
+        secretName: $(params.registryPullSecretName)
 
   steps:
     - name: get-kubeconfig
@@ -92,6 +99,40 @@ spec:
         fi
 
         echo "✅ Kubeconfig saved"
+
+    - name: configure-pull-secret
+      image: quay.io/openshift/origin-cli:4.21
+      volumeMounts:
+        - name: credentials
+          mountPath: /credentials
+        - name: stage-pull-secret
+          mountPath: /stage-pull-secret
+      env:
+        - name: KUBECONFIG
+          value: /credentials/kubeconfig
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        echo "Merging stage registry credentials into cluster pull secret..."
+
+        CLUSTER_PULL=$(oc get secret pull-secret -n openshift-config -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d)
+        STAGE_PULL=$(cat /stage-pull-secret/.dockerconfigjson)
+
+        MERGED=$(echo "$CLUSTER_PULL" "$STAGE_PULL" | python3 -c "
+        import sys, json
+        cluster = json.loads(sys.stdin.readline())
+        stage = json.loads(sys.stdin.readline())
+        cluster['auths'].update(stage.get('auths', {}))
+        print(json.dumps(cluster))
+        ")
+
+        echo "$MERGED" > /tmp/merged-pull-secret.json
+        oc set data secret/pull-secret -n openshift-config --from-file=.dockerconfigjson=/tmp/merged-pull-secret.json
+
+        echo "Registries in pull secret:"
+        echo "$MERGED" | python3 -c "import sys,json; print('\n'.join(sorted(json.load(sys.stdin)['auths'].keys())))"
+        echo "✅ Stage registry credentials merged"
 
     - name: configure-registry-mirror
       image: quay.io/openshift/origin-cli:4.21

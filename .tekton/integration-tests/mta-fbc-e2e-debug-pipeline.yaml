@@ -15,7 +15,7 @@ spec:
     - name: CLUSTER_ID
       description: Pre-existing OCPCTL cluster UUID
       type: string
-      default: "228c596b-7fa3-4102-ac04-b6d764d8ef81"
+      default: "3a62c489-71a1-4f4c-83cd-71f868b27749"
 
   results:
     - name: DEPLOYMENT_STATUS
