@@ -125,11 +125,26 @@ spec:
 
               echo "Running all tests: @ci + @tier0-3 (excluding tests requiring secrets)"
 
-              # cypress-tags plugin filters tests using environment variables
-              # CYPRESS_INCLUDE_TAGS: comma-separated list of tags to include
-              export CYPRESS_INCLUDE_TAGS="@ci,@tier0,@tier2_A,@tier2_B,@tier3_A,@tier3_B,@tier3_C,@tier3_D,@tier3_E,@tier3_F"
+              # Build spec file list from tier tags using the same approach as GitHub Actions
+              TEST_TAGS="@ci,@tier0,@tier2_A,@tier2_B,@tier3_A,@tier3_B,@tier3_C,@tier3_D,@tier3_E,@tier3_F"
+              echo "Finding test files matching tags: $TEST_TAGS"
+              SPEC_FILES=$(node scripts/findTierFiles.mjs "$TEST_TAGS")
+
+              if [ -z "$SPEC_FILES" ]; then
+                echo "ERROR: No test files found matching tags: $TEST_TAGS"
+                echo "FAILED" > $(results.testStatus.path)
+                exit 1
+              fi
+
+              # Count how many files will be tested
+              FILE_COUNT=$(echo "$SPEC_FILES" | tr ',' '\n' | wc -l)
+              echo "Found $FILE_COUNT test files to run"
+
+              # cypress-tags plugin filters individual tests within the matched files
+              export CYPRESS_INCLUDE_TAGS="$TEST_TAGS"
 
               if npx dotenvx run -- npx cypress run \
+                --spec "$SPEC_FILES" \
                 --config-file cypress.config.ts \
                 --config baseUrl="$BASE_URL",chromeWebSecurity=false,video=true; then
                 echo "PASSED" > $(results.testStatus.path)
