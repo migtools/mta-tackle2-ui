@@ -88,17 +88,30 @@ spec:
 
         echo "Downloading kubeconfig for cluster $CLUSTER_ID..."
 
-        HTTP_CODE=$(curl -s -o "$KUBECONFIG_PATH" -w "%{http_code}" \
-          -H "Authorization: Bearer $OCPCTL_API_KEY" \
-          "$OCPCTL_URL/clusters/$CLUSTER_ID/kubeconfig")
+        # Retry kubeconfig download - cluster might be READY but kubeconfig not immediately available
+        MAX_RETRIES=10
+        RETRY_DELAY=30
+        for i in $(seq 1 $MAX_RETRIES); do
+          HTTP_CODE=$(curl -s -o "$KUBECONFIG_PATH" -w "%{http_code}" \
+            -H "Authorization: Bearer $OCPCTL_API_KEY" \
+            "$OCPCTL_URL/clusters/$CLUSTER_ID/kubeconfig")
 
-        if [ "$HTTP_CODE" != "200" ]; then
-          echo "❌ Failed to download kubeconfig (HTTP $HTTP_CODE)"
-          cat "$KUBECONFIG_PATH"
-          exit 1
-        fi
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ Kubeconfig downloaded successfully"
+            break
+          fi
 
-        echo "✅ Kubeconfig saved"
+          echo "⚠️ Attempt $i/$MAX_RETRIES failed (HTTP $HTTP_CODE)"
+          cat "$KUBECONFIG_PATH" 2>/dev/null || echo "(no response body)"
+
+          if [ $i -eq $MAX_RETRIES ]; then
+            echo "❌ Failed to download kubeconfig after $MAX_RETRIES attempts"
+            exit 1
+          fi
+
+          echo "Retrying in ${RETRY_DELAY}s..."
+          sleep $RETRY_DELAY
+        done
 
     - name: configure-pull-secret
       image: quay.io/openshift/origin-cli:4.21
