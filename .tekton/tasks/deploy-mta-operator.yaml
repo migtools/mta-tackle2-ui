@@ -88,30 +88,31 @@ spec:
 
         echo "Downloading kubeconfig for cluster $CLUSTER_ID..."
 
-        # Retry kubeconfig download - cluster might be READY but kubeconfig not immediately available
-        MAX_RETRIES=10
-        RETRY_DELAY=30
-        for i in $(seq 1 $MAX_RETRIES); do
-          HTTP_CODE=$(curl -s -o "$KUBECONFIG_PATH" -w "%{http_code}" \
-            -H "Authorization: Bearer $OCPCTL_API_KEY" \
-            "$OCPCTL_URL/clusters/$CLUSTER_ID/kubeconfig")
+        # Step 1: Get pre-signed download URL from OCPCTL API
+        DOWNLOAD_URL_RESPONSE=$(curl -s -H "Authorization: Bearer $OCPCTL_API_KEY" \
+          "$OCPCTL_URL/clusters/$CLUSTER_ID/kubeconfig/download-url")
 
-          if [ "$HTTP_CODE" = "200" ]; then
-            echo "✅ Kubeconfig downloaded successfully"
-            break
-          fi
+        # Extract download URL using grep/sed (no jq available)
+        DOWNLOAD_URL=$(echo "$DOWNLOAD_URL_RESPONSE" | grep -o '"download_url":"[^"]*"' | cut -d'"' -f4 | sed 's/\\u0026/\&/g')
 
-          echo "⚠️ Attempt $i/$MAX_RETRIES failed (HTTP $HTTP_CODE)"
-          cat "$KUBECONFIG_PATH" 2>/dev/null || echo "(no response body)"
+        if [ -z "$DOWNLOAD_URL" ]; then
+          echo "❌ Failed to get kubeconfig download URL"
+          echo "Response: $DOWNLOAD_URL_RESPONSE"
+          exit 1
+        fi
 
-          if [ $i -eq $MAX_RETRIES ]; then
-            echo "❌ Failed to download kubeconfig after $MAX_RETRIES attempts"
-            exit 1
-          fi
+        echo "Got download URL (expires in 15 minutes)"
 
-          echo "Retrying in ${RETRY_DELAY}s..."
-          sleep $RETRY_DELAY
-        done
+        # Step 2: Download kubeconfig from S3 pre-signed URL
+        HTTP_CODE=$(curl -s -o "$KUBECONFIG_PATH" -w "%{http_code}" "$DOWNLOAD_URL")
+
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "❌ Failed to download kubeconfig from S3 (HTTP $HTTP_CODE)"
+          cat "$KUBECONFIG_PATH"
+          exit 1
+        fi
+
+        echo "✅ Kubeconfig downloaded successfully"
 
     - name: configure-pull-secret
       image: quay.io/openshift/origin-cli:4.21
