@@ -13,6 +13,9 @@ spec:
       type: string
 
   results:
+    - name: IMAGE_VERIFICATION
+      description: Pre-flight image pullability check status
+      value: $(tasks.verify-image-pullable.results.verificationStatus)
     - name: CLUSTER_NAME
       description: Name of the provisioned cluster
       value: $(tasks.provision-cluster.results.clusterName)
@@ -38,9 +41,25 @@ spec:
           - name: pathInRepo
             value: tasks/test_metadata.yaml
 
-    - name: provision-cluster
+    - name: verify-image-pullable
       runAfter:
         - parse-metadata
+      params:
+        - name: fbcImage
+          value: $(tasks.parse-metadata.results.component-container-image)
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/migtools/mta-tackle2-ui
+          - name: revision
+            value: use_ocpctl_clusters
+          - name: pathInRepo
+            value: .tekton/tasks/verify-image-pullable.yaml
+
+    - name: provision-cluster
+      runAfter:
+        - verify-image-pullable
       params:
         - name: clusterName
           value: "$(context.pipelineRun.uid)"
@@ -102,21 +121,7 @@ spec:
               UI_ROUTE="$(params.uiRoute)"
               BASE_URL="https://${UI_ROUTE}"
 
-              echo "=========== DEBUG INFO ==========="
               echo "MTA UI URL: $BASE_URL"
-              echo "NODE_TLS_REJECT_UNAUTHORIZED=$NODE_TLS_REJECT_UNAUTHORIZED"
-
-              echo "Installing curl..."
-              apt-get update -qq && apt-get install -y -qq curl > /dev/null 2>&1 || echo "WARNING: could not install curl"
-
-              echo "Checking MTA UI reachability..."
-              curl -sk -o /dev/null -w "HTTP %{http_code} (%{time_total}s)\n" "$BASE_URL" || echo "WARNING: UI not reachable"
-
-              echo "Checking MTA UI page content..."
-              curl -sk "$BASE_URL" 2>/dev/null | head -50
-              echo ""
-              echo "Following redirects..."
-              curl -sk -L -o /dev/null -w "Final URL: %{url_effective}\nHTTP %{http_code}\n" "$BASE_URL" || echo "WARNING: redirect check failed"
 
               echo "Cloning tackle2-ui repository..."
               cd /tmp
@@ -139,7 +144,7 @@ spec:
               echo "CYPRESS_BASE_URL=${CYPRESS_BASE_URL:-<not set>}"
               echo "========================="
 
-              if DEBUG=cypress:server:* npx dotenvx run -- npx cypress run \
+              if npx dotenvx run -- npx cypress run \
                 --spec "e2e/tests/login.test.ts" \
                 --config-file cypress.config.ts \
                 --config baseUrl="$BASE_URL",chromeWebSecurity=false,video=true; then

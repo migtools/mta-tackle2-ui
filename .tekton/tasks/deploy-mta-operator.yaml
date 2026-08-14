@@ -44,7 +44,7 @@ spec:
       description: OCPCTL API base URL
     - name: ocpctlSecretName
       type: string
-      default: "ocpctl-api-key"
+      default: "ocpctl-ci-key"
       description: Name of the Kubernetes Secret containing the OCPCTL API key
     - name: registryPullSecretName
       type: string

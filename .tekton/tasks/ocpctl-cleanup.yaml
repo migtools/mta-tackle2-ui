@@ -33,7 +33,7 @@ spec:
       description: Timeout in seconds waiting for DESTROYED status
     - name: ocpctlSecretName
       type: string
-      default: "ocpctl-api-key"
+      default: "ocpctl-ci-key"
       description: Name of the Kubernetes Secret containing the OCPCTL API key
 
   steps:

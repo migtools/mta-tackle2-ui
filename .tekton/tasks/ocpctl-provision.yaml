@@ -55,7 +55,7 @@ spec:
       description: Timeout in seconds waiting for READY status
     - name: ocpctlSecretName
       type: string
-      default: "ocpctl-api-key"
+      default: "ocpctl-ci-key"
       description: Name of the Kubernetes Secret containing the OCPCTL API key
 
   results:
