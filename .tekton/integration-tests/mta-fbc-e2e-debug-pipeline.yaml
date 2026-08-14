@@ -126,19 +126,32 @@ spec:
               echo "Running all tests: @ci + @tier0-3 (excluding tests requiring secrets)"
 
               # Build spec file list from tier tags using the same approach as GitHub Actions
-              TEST_TAGS="@ci,@tier0,@tier2_A,@tier2_B,@tier3_A,@tier3_B,@tier3_C,@tier3_D,@tier3_E,@tier3_F"
+              # Excluding @tier2_B because it includes JIRA tests requiring secrets
+              TEST_TAGS="@ci,@tier0,@tier2_A,@tier3_A,@tier3_B,@tier3_C,@tier3_D,@tier3_E,@tier3_F"
               echo "Finding test files matching tags: $TEST_TAGS"
-              SPEC_FILES=$(node scripts/findTierFiles.mjs "$TEST_TAGS")
+              ALL_SPEC_FILES=$(node scripts/findTierFiles.mjs "$TEST_TAGS")
+
+              if [ -z "$ALL_SPEC_FILES" ]; then
+                echo "ERROR: No test files found matching tags: $TEST_TAGS"
+                echo "FAILED" > $(results.testStatus.path)
+                exit 1
+              fi
+
+              echo "Found $(echo "$ALL_SPEC_FILES" | tr ',' '\n' | wc -l) files with matching tags"
+
+              # Filter out files requiring secrets (metrics, JIRA, Git, Maven, SVN, Proxy)
+              echo "Excluding files requiring secrets..."
+              SPEC_FILES=$(echo "$ALL_SPEC_FILES" | tr ',' '\n' | grep -v -E '(custom-metrics|jira|proxy|sourcecontrol_crud|maven_crud|repository/git|repository/maven|repository/subversion|export_to_jira|discovery\.test)' | tr '\n' ',' | sed 's/,$//')
 
               if [ -z "$SPEC_FILES" ]; then
-                echo "ERROR: No test files found matching tags: $TEST_TAGS"
+                echo "ERROR: No test files remaining after filtering secrets"
                 echo "FAILED" > $(results.testStatus.path)
                 exit 1
               fi
 
               # Count how many files will be tested
               FILE_COUNT=$(echo "$SPEC_FILES" | tr ',' '\n' | wc -l)
-              echo "Found $FILE_COUNT test files to run"
+              echo "Found $FILE_COUNT test files to run (after excluding secret-requiring tests)"
 
               # cypress-tags plugin filters individual tests within the matched files
               export CYPRESS_INCLUDE_TAGS="$TEST_TAGS"
