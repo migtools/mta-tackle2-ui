@@ -50,10 +50,11 @@ spec:
           echo "✓ Image is pullable"
           echo ""
           echo "Image details:"
-          echo "$INSPECT_OUTPUT" | jq -r '{Digest, Created, Architecture, Os}'
+          echo "$INSPECT_OUTPUT"
 
-          # Extract digest for result
-          DIGEST=$(echo "$INSPECT_OUTPUT" | jq -r '.Digest')
+          # Extract digest for result (parse JSON without jq using grep/sed)
+          DIGEST=$(echo "$INSPECT_OUTPUT" | grep -o '"Digest":"[^"]*"' | sed 's/"Digest":"\([^"]*\)"/\1/')
+          echo "Digest: $DIGEST"
           echo "$DIGEST" > $(results.imageDigest.path)
           echo "PASSED" > $(results.verificationStatus.path)
         else
