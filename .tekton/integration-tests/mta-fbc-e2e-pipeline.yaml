@@ -134,6 +134,13 @@ spec:
         steps:
           - name: run-tests
             image: cypress/included:15.7.0
+            resources:
+              requests:
+                memory: 4Gi
+                cpu: 2
+              limits:
+                memory: 8Gi
+                cpu: 4
             env:
               - name: CYPRESS_CACHE_FOLDER
                 value: /tmp/.cache/Cypress
@@ -199,7 +206,7 @@ spec:
               if npx dotenvx run -- npx cypress run \
                 --spec "$SPEC_FILES" \
                 --config-file cypress.config.ts \
-                --config baseUrl="$BASE_URL",chromeWebSecurity=false,video=true; then
+                --config baseUrl="$BASE_URL",chromeWebSecurity=false,video=false; then
                 echo "PASSED" > $(results.testStatus.path)
               else
                 echo "FAILED" > $(results.testStatus.path)
