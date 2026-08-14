@@ -49,6 +49,13 @@ spec:
         #!/bin/bash
         set -euo pipefail
 
+        # Install python3 for JSON parsing (UBI9 minimal doesn't include it)
+        echo "Installing python3..."
+        microdnf install -y python3 > /dev/null 2>&1 || {
+          echo "❌ Failed to install python3 - cannot parse OCPCTL API responses"
+          exit 1
+        }
+
         OCPCTL_URL="$(params.ocpctlUrl)"
         CLUSTER_ID="$(params.clusterId)"
         RAW_NAME="$(params.clusterName)"
@@ -57,20 +64,23 @@ spec:
           DERIVED_NAME="mta-$(echo "$RAW_NAME" | tr -d '-' | head -c 13)"
           echo "No cluster ID provided. Looking up cluster by name: $DERIVED_NAME"
 
-          CLUSTERS_RESPONSE=$(curl -s \
+          CLUSTERS_RESPONSE=$(curl -s --max-time 30 --retry 3 --retry-delay 5 \
             -H "Authorization: Bearer $OCPCTL_API_KEY" \
-            "$OCPCTL_URL/clusters")
+            "$OCPCTL_URL/clusters" || echo "")
 
           CLUSTER_ID=$(echo "$CLUSTERS_RESPONSE" | python3 -c "
         import sys, json
-        data = json.load(sys.stdin)
-        clusters = data if isinstance(data, list) else data.get('clusters', data.get('items', []))
-        name = '$DERIVED_NAME'
-        for c in clusters:
-            cluster = c.get('cluster', c) if isinstance(c, dict) else c
-            if cluster.get('name') == name and cluster.get('status', '').upper() not in ('DESTROYED',):
-                print(cluster.get('id', ''))
-                break
+        try:
+            data = json.load(sys.stdin)
+            clusters = data if isinstance(data, list) else data.get('clusters', data.get('items', []))
+            name = '$DERIVED_NAME'
+            for c in clusters:
+                cluster = c.get('cluster', c) if isinstance(c, dict) else c
+                if cluster.get('name') == name and cluster.get('status', '').upper() not in ('DESTROYED',):
+                    print(cluster.get('id', ''))
+                    break
+        except:
+            pass
         " 2>/dev/null || echo "")
 
           if [ -n "$CLUSTER_ID" ]; then
@@ -88,13 +98,15 @@ spec:
 
         echo "Deleting OCPCTL cluster $CLUSTER_ID..."
 
-        HTTP_CODE=$(curl -s -o /tmp/delete-response.json -w "%{http_code}" \
+        HTTP_CODE=$(curl -s --max-time 30 --retry 3 --retry-delay 5 \
+          -o /tmp/delete-response.json -w "%{http_code}" \
           -X DELETE "$OCPCTL_URL/clusters/$CLUSTER_ID" \
-          -H "Authorization: Bearer $OCPCTL_API_KEY")
+          -H "Authorization: Bearer $OCPCTL_API_KEY" || echo "000")
 
-        if [ "$HTTP_CODE" != "200" ]; then
+        if [[ "$HTTP_CODE" != "200" && "$HTTP_CODE" != "202" && "$HTTP_CODE" != "204" ]]; then
           echo "⚠️  Delete request returned HTTP $HTTP_CODE"
-          cat /tmp/delete-response.json
+          cat /tmp/delete-response.json 2>/dev/null || echo "(no response body)"
+          echo "Cleanup will not wait for DESTROYED status"
           exit 0
         fi
 
@@ -105,18 +117,28 @@ spec:
         ELAPSED=0
 
         while true; do
-          RESPONSE=$(curl -s \
+          HTTP_CODE=$(curl -s --max-time 30 --retry 3 --retry-delay 5 \
+            -o /tmp/status-response.json -w "%{http_code}" \
             -H "Authorization: Bearer $OCPCTL_API_KEY" \
-            "$OCPCTL_URL/clusters/$CLUSTER_ID")
+            "$OCPCTL_URL/clusters/$CLUSTER_ID" || echo "000")
 
-          STATUS=$(echo "$RESPONSE" | python3 -c "
+          # 404 means cluster is already gone - treat as success
+          if [ "$HTTP_CODE" = "404" ]; then
+            echo "✅ Cluster no longer exists (404) - already destroyed"
+            exit 0
+          fi
+
+          STATUS=$(cat /tmp/status-response.json 2>/dev/null | python3 -c "
         import sys, json
-        data = json.load(sys.stdin)
-        cluster = data.get('cluster', data)
-        print(cluster.get('status', 'UNKNOWN').upper())
+        try:
+            data = json.load(sys.stdin)
+            cluster = data.get('cluster', data)
+            print(cluster.get('status', 'UNKNOWN').upper())
+        except:
+            print('UNKNOWN')
         " 2>/dev/null || echo "UNKNOWN")
 
-          echo "Status: $STATUS ($ELAPSED/${TIMEOUT}s)"
+          echo "Status: $STATUS ($ELAPSED/${TIMEOUT}s, HTTP $HTTP_CODE)"
 
           if [ "$STATUS" = "DESTROYED" ]; then
             echo "✅ Cluster destroyed"

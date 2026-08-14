@@ -16,6 +16,9 @@ spec:
     - name: IMAGE_VERIFICATION
       description: Pre-flight image pullability check status
       value: $(tasks.verify-image-pullable.results.verificationStatus)
+    - name: PROVISION_STATUS
+      description: Cluster provisioning status (READY, TIMEOUT, or FAILED)
+      value: $(tasks.provision-cluster.results.provisionStatus)
     - name: CLUSTER_NAME
       description: Name of the provisioned cluster
       value: $(tasks.provision-cluster.results.clusterName)
@@ -73,9 +76,34 @@ spec:
           - name: pathInRepo
             value: .tekton/tasks/ocpctl-provision.yaml
 
-    - name: deploy-operator
+    - name: verify-provision
       runAfter:
         - provision-cluster
+      params:
+        - name: provisionStatus
+          value: $(tasks.provision-cluster.results.provisionStatus)
+      taskSpec:
+        params:
+          - name: provisionStatus
+        steps:
+          - name: check-status
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            script: |
+              #!/bin/bash
+              STATUS="$(params.provisionStatus)"
+              echo "Cluster provision status: $STATUS"
+
+              if [ "$STATUS" != "READY" ]; then
+                echo "❌ Cluster provisioning failed or timed out"
+                echo "Cluster ID was saved and will be cleaned up in finally step"
+                exit 1
+              fi
+
+              echo "✅ Cluster is ready, proceeding with deployment"
+
+    - name: deploy-operator
+      runAfter:
+        - verify-provision
       params:
         - name: clusterId
           value: $(tasks.provision-cluster.results.clusterId)

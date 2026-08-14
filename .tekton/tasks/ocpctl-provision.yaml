@@ -62,7 +62,9 @@ spec:
     - name: clusterName
       description: Name of the created cluster
     - name: clusterId
-      description: UUID of the created cluster
+      description: UUID of the created cluster (always set, even if wait fails)
+    - name: provisionStatus
+      description: Provisioning status (READY or FAILED)
 
   steps:
     - name: create-cluster
@@ -76,6 +78,13 @@ spec:
       script: |
         #!/bin/bash
         set -euo pipefail
+
+        # Install python3 for JSON parsing (UBI9 minimal doesn't include it)
+        echo "Installing python3..."
+        microdnf install -y python3 > /dev/null 2>&1 || {
+          echo "❌ Failed to install python3 - cannot parse OCPCTL API responses"
+          exit 1
+        }
 
         OCPCTL_URL="$(params.ocpctlUrl)"
         RAW_NAME="$(params.clusterName)"
@@ -128,6 +137,13 @@ spec:
         #!/bin/bash
         set -euo pipefail
 
+        # Install python3 for JSON parsing (UBI9 minimal doesn't include it)
+        echo "Installing python3..."
+        microdnf install -y python3 > /dev/null 2>&1 || {
+          echo "❌ Failed to install python3 - cannot parse OCPCTL API responses"
+          exit 1
+        }
+
         OCPCTL_URL="$(params.ocpctlUrl)"
         CLUSTER_ID=$(cat $(results.clusterId.path))
         TIMEOUT=$(params.waitTimeout)
@@ -137,32 +153,40 @@ spec:
         echo "Waiting for cluster $CLUSTER_ID to reach READY (timeout: ${TIMEOUT}s)..."
 
         while true; do
-          RESPONSE=$(curl -s \
+          RESPONSE=$(curl -s --max-time 30 --retry 3 --retry-delay 5 \
             -H "Authorization: Bearer $OCPCTL_API_KEY" \
-            "$OCPCTL_URL/clusters/$CLUSTER_ID")
+            "$OCPCTL_URL/clusters/$CLUSTER_ID" || echo "")
 
           STATUS=$(echo "$RESPONSE" | python3 -c "
         import sys, json
-        data = json.load(sys.stdin)
-        cluster = data.get('cluster', data)
-        print(cluster.get('status', 'UNKNOWN').upper())
-        ")
+        try:
+            data = json.load(sys.stdin)
+            cluster = data.get('cluster', data)
+            print(cluster.get('status', 'UNKNOWN').upper())
+        except:
+            print('UNKNOWN')
+        " || echo "UNKNOWN")
 
           echo "Status: $STATUS ($ELAPSED/${TIMEOUT}s)"
 
           if [ "$STATUS" = "READY" ]; then
             echo "✅ Cluster is READY"
+            echo -n "READY" > $(results.provisionStatus.path)
             exit 0
           fi
 
           if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "DESTROY_FAILED" ]; then
             echo "❌ Cluster reached failure status: $STATUS"
-            exit 1
+            echo -n "FAILED" > $(results.provisionStatus.path)
+            # Do NOT exit 1 - we need clusterId available for cleanup
+            exit 0
           fi
 
           if [ $ELAPSED -ge $TIMEOUT ]; then
             echo "❌ Timed out waiting for cluster. Last status: $STATUS"
-            exit 1
+            echo -n "TIMEOUT" > $(results.provisionStatus.path)
+            # Do NOT exit 1 - we need clusterId available for cleanup
+            exit 0
           fi
 
           sleep $INTERVAL
