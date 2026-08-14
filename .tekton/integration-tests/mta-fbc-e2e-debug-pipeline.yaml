@@ -1,27 +1,28 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: mta-fbc-e2e-pipeline
+  name: mta-fbc-e2e-debug-pipeline
 spec:
   description: |
-    Deploy MTA operator from FBC catalog to ephemeral OCPCTL cluster and run E2E tests.
-    Uses modular reusable tasks from .tekton/tasks/ for cluster lifecycle and operator deployment.
+    DEBUG pipeline - Deploy MTA operator to PRE-EXISTING OCPCTL cluster and run E2E tests.
+    Use this for testing without provisioning a new cluster.
 
   params:
     - name: SNAPSHOT
       description: Application Snapshot JSON
       type: string
+    - name: clusterId
+      description: UUID of the pre-existing OCPCTL cluster
+      type: string
+    - name: skipCleanup
+      description: Skip cluster cleanup after tests (default true for debug)
+      type: string
+      default: "true"
 
   results:
     - name: IMAGE_VERIFICATION
       description: Pre-flight image pullability check status
       value: $(tasks.verify-image-pullable.results.verificationStatus)
-    - name: PROVISION_STATUS
-      description: Cluster provisioning status (READY, TIMEOUT, or FAILED)
-      value: $(tasks.provision-cluster.results.provisionStatus)
-    - name: CLUSTER_NAME
-      description: Name of the provisioned cluster
-      value: $(tasks.provision-cluster.results.clusterName)
     - name: DEPLOYMENT_STATUS
       description: Operator deployment status
       value: $(tasks.deploy-operator.results.deploymentStatus)
@@ -60,53 +61,12 @@ spec:
           - name: pathInRepo
             value: .tekton/tasks/verify-image-pullable.yaml
 
-    - name: provision-cluster
+    - name: deploy-operator
       runAfter:
         - verify-image-pullable
       params:
-        - name: clusterName
-          value: "$(context.pipelineRun.uid)"
-      taskRef:
-        resolver: git
-        params:
-          - name: url
-            value: https://github.com/migtools/mta-tackle2-ui
-          - name: revision
-            value: use_ocpctl_clusters
-          - name: pathInRepo
-            value: .tekton/tasks/ocpctl-provision.yaml
-
-    - name: verify-provision
-      runAfter:
-        - provision-cluster
-      params:
-        - name: provisionStatus
-          value: $(tasks.provision-cluster.results.provisionStatus)
-      taskSpec:
-        params:
-          - name: provisionStatus
-        steps:
-          - name: check-status
-            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
-            script: |
-              #!/bin/bash
-              STATUS="$(params.provisionStatus)"
-              echo "Cluster provision status: $STATUS"
-
-              if [ "$STATUS" != "READY" ]; then
-                echo "❌ Cluster provisioning failed or timed out"
-                echo "Cluster ID was saved and will be cleaned up in finally step"
-                exit 1
-              fi
-
-              echo "✅ Cluster is ready, proceeding with deployment"
-
-    - name: deploy-operator
-      runAfter:
-        - verify-provision
-      params:
         - name: clusterId
-          value: $(tasks.provision-cluster.results.clusterId)
+          value: $(params.clusterId)
         - name: fbcImage
           value: $(tasks.parse-metadata.results.component-container-image)
       taskRef:
@@ -179,11 +139,15 @@ spec:
 
   finally:
     - name: cleanup-cluster
+      when:
+        - input: "$(params.skipCleanup)"
+          operator: notin
+          values: ["true", "True", "TRUE", "yes", "Yes", "YES"]
       params:
         - name: clusterId
-          value: $(tasks.provision-cluster.results.clusterId)
+          value: $(params.clusterId)
         - name: clusterName
-          value: "$(context.pipelineRun.uid)"
+          value: ""
       taskRef:
         resolver: git
         params:
