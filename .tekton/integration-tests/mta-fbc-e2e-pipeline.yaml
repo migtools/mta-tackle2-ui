@@ -165,11 +165,11 @@ spec:
 
               echo "Running all tests: @ci + @tier0-3 (excluding tests requiring secrets)"
 
-              # Run tests matching CI matrix, explicitly excluding tests that require secrets
-              # Use both tag filtering AND spec exclusions for maximum reliability
+              # cypress-tags plugin filters tests using environment variables
+              # CYPRESS_INCLUDE_TAGS: comma-separated list of tags to include
+              export CYPRESS_INCLUDE_TAGS="@ci,@tier0,@tier2_A,@tier2_B,@tier3_A,@tier3_B,@tier3_C,@tier3_D,@tier3_E,@tier3_F"
+
               if npx dotenvx run -- npx cypress run \
-                --env grepTags="(@ci or @tier0 or @tier2_A or @tier2_B or @tier3_A or @tier3_B or @tier3_C or @tier3_D or @tier3_E or @tier3_F) and -@tier2_secretsNeeded and -@tier3_secretsNeeded",grepFilterSpecs=true \
-                --exclude-spec-pattern "**/custom-metrics/**,**/jira*/**,**/repository/git.test.ts,**/repository/maven.test.ts,**/repository/subversion.test.ts,**/credentials/jira_crud.test.ts,**/credentials/sourcecontrol_crud.test.ts,**/credentials/maven_crud.test.ts,**/export_to_jira*.test.ts,**/analysis_with_proxyenabled.test.ts,**/proxy*.test.ts,**/discovery.test.ts" \
                 --config-file cypress.config.ts \
                 --config baseUrl="$BASE_URL",chromeWebSecurity=false,video=true; then
                 echo "PASSED" > $(results.testStatus.path)
