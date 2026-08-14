@@ -91,16 +91,17 @@ spec:
         results:
           - name: testStatus
             description: Test execution status (PASSED or FAILED)
+        stepTemplate:
+          computeResources:
+            requests:
+              memory: 4Gi
+              cpu: "2"
+            limits:
+              memory: 8Gi
+              cpu: "4"
         steps:
           - name: run-tests
             image: cypress/included:15.7.0
-            resources:
-              requests:
-                memory: 4Gi
-                cpu: 2
-              limits:
-                memory: 8Gi
-                cpu: 4
             env:
               - name: CYPRESS_CACHE_FOLDER
                 value: /tmp/.cache/Cypress
