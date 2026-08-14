@@ -48,12 +48,9 @@ spec:
         echo "Running: skopeo inspect --retry-times=3 docker://$FBC_IMAGE"
         if INSPECT_OUTPUT=$(skopeo inspect --retry-times=3 --no-tags "docker://$FBC_IMAGE" 2>&1); then
           echo "✓ Image is pullable"
-          echo ""
-          echo "Image details:"
-          echo "$INSPECT_OUTPUT"
 
           # Extract digest for result (parse JSON without jq using grep/sed)
-          DIGEST=$(echo "$INSPECT_OUTPUT" | grep -o '"Digest":"[^"]*"' | sed 's/"Digest":"\([^"]*\)"/\1/')
+          DIGEST=$(echo "$INSPECT_OUTPUT" | grep -o '"Digest":"[^"]*"' | head -1 | cut -d'"' -f4 || echo "unknown")
           echo "Digest: $DIGEST"
           echo "$DIGEST" > $(results.imageDigest.path)
           echo "PASSED" > $(results.verificationStatus.path)
