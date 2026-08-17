@@ -65,7 +65,7 @@ Extracts the FBC image reference from the Konflux snapshot.
 Provisions an ephemeral cluster via OCPCTL REST API (`https://ocpctl.mg.dog8code.com`):
 
 - Profile: `aws-sno-ga` (Single-Node OpenShift on AWS)
-- OpenShift version: 4.17
+- OpenShift version: 4.21
 - Region: us-east-1
 - Polls until cluster reaches `READY` status (timeout: 60 minutes)
 
@@ -103,7 +103,7 @@ Deletes the OCPCTL cluster regardless of pipeline success or failure:
 - **Profile**: `aws-sno-ga`
 - **Namespace**: `openshift-mta`
 - **Operator channel**: `stable-v8.1`
-- **Cluster version**: OpenShift 4.17
+- **Cluster version**: OpenShift 4.21
 - **Total runtime**: ~30-45 minutes
 
 ## Prerequisites
