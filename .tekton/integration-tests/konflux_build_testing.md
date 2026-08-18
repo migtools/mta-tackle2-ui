@@ -93,16 +93,9 @@ Testing individual component snapshots would be like testing car parts instead o
 
 ### Configuration
 
-**Correct IntegrationTestScenario:**
+**IntegrationTestScenario:**
 ```yaml
 name: mta-fbc-8-2-ui-e2e-test
 application: fbc-mta-8-2  # ✅ FBC application
 pipeline: mta-fbc-e2e-pipeline.yaml
-```
-
-**Incorrect (don't use):**
-```yaml
-name: mta-8-2-ui-e2e-test
-application: mta-8-2  # ❌ Component application (no FBC image)
-pipeline: mta-fbc-e2e-pipeline.yaml  # Would fail - needs FBC
 ```
