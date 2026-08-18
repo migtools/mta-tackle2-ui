@@ -29,6 +29,7 @@ The pipeline is composed of modular Tekton Tasks in `.tekton/tasks/`. Each task 
 | `ocpctl-cleanup`        | `.tekton/tasks/ocpctl-cleanup.yaml`        | Delete OCPCTL cluster + wait for DESTROYED       |
 | `deploy-mta-operator`   | `.tekton/tasks/deploy-mta-operator.yaml`   | Deploy MTA operator from FBC image               |
 | `verify-image-pullable` | `.tekton/tasks/verify-image-pullable.yaml` | Pre-flight check to verify FBC image is pullable |
+| `slack-notification`    | `.tekton/tasks/slack-notification.yaml`    | Send test results notification to Slack          |
 
 ### Using tasks in another pipeline
 
@@ -136,6 +137,30 @@ Create via Konflux UI: Secrets → Add secret.
 - **Type**: `kubernetes.io/dockerconfigjson`
 - **Key**: `.dockerconfigjson`
 - **Value**: Docker config JSON with `registry.stage.redhat.io` credentials
+
+### Slack Notifications
+
+The pipeline sends test completion notifications to Slack. This requires a Slack webhook URL configured as a Kubernetes Secret.
+
+**Required Secret** (create in Konflux workspace):
+
+- **Secret name**: `slack-webhook`
+- **Type**: `Opaque`
+- **Key**: `url`
+- **Value**: Slack webhook URL (e.g., `https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXX`)
+
+**How to get a Slack webhook URL:**
+
+1. Go to your Slack workspace settings
+2. Navigate to: Apps → Manage → Custom Integrations → Incoming Webhooks
+3. Add a new webhook and select the target channel
+4. Copy the webhook URL
+
+**Notification format:**
+
+- ✅ Success: Green message with PASSED status
+- ❌ Failure: Red message with FAILED status
+- Includes: Pipeline run name, cluster name, test count, and link to Konflux UI
 
 ## Adding a New Pipeline for a New MTA Version
 

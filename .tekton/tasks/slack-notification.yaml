@@ -1,0 +1,117 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: slack-notification
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/categories: Notification
+    tekton.dev/tags: slack,notification
+    tekton.dev/displayName: "Send Slack Notification"
+spec:
+  description: >-
+    Send test results notification to Slack channel.
+    Reports pipeline execution status, test results, and links to pipeline run.
+
+  params:
+    - name: testStatus
+      type: string
+      description: Test execution status (Succeeded/Failed)
+    - name: pipelineRunName
+      type: string
+      description: Name of the pipeline run
+    - name: slackWebhookSecretName
+      type: string
+      default: "slack-webhook"
+      description: Name of the Kubernetes Secret containing Slack webhook URL
+    - name: slackWebhookSecretKey
+      type: string
+      default: "url"
+      description: Key in the secret containing the webhook URL
+
+  steps:
+    - name: send-notification
+      image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+      env:
+        - name: SLACK_WEBHOOK_URL
+          valueFrom:
+            secretKeyRef:
+              name: $(params.slackWebhookSecretName)
+              key: $(params.slackWebhookSecretKey)
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        TEST_STATUS="$(params.testStatus)"
+        PIPELINE_RUN="$(params.pipelineRunName)"
+
+        echo "Sending Slack notification for pipeline: $PIPELINE_RUN"
+        echo "Test Status: $TEST_STATUS"
+
+        # Determine emoji and status message
+        if [ "$TEST_STATUS" = "Succeeded" ]; then
+          EMOJI=":white_check_mark:"
+          COLOR="good"
+          STATUS_TEXT="PASSED"
+        else
+          EMOJI=":x:"
+          COLOR="danger"
+          STATUS_TEXT="FAILED"
+        fi
+
+        # Construct Slack message
+        MESSAGE=$(cat <<EOF
+        {
+          "attachments": [
+            {
+              "color": "$COLOR",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "$EMOJI MTA E2E Tests $STATUS_TEXT"
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Status:* $STATUS_TEXT\n\n:link: <https://console-openshift-console.apps.stone-prd-rh01.pg1f.p1.openshiftapps.com/k8s/ns/art-mta-tenant/tekton.dev~v1~PipelineRun/$PIPELINE_RUN|*View Full Results in Konflux*>"
+                  }
+                },
+                {
+                  "type": "context",
+                  "elements": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "Pipeline: \`$PIPELINE_RUN\`"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+        EOF
+        )
+
+        # Install curl
+        echo "Installing curl..."
+        microdnf install -y curl > /dev/null 2>&1
+
+        # Send to Slack
+        echo "Sending notification to Slack..."
+        HTTP_CODE=$(curl -X POST -H 'Content-type: application/json' \
+          --data "$MESSAGE" \
+          -w "%{http_code}" \
+          -o /tmp/slack-response.txt \
+          "$SLACK_WEBHOOK_URL")
+
+        if [ "$HTTP_CODE" = "200" ]; then
+          echo "✅ Slack notification sent successfully"
+        else
+          echo "⚠️ Failed to send Slack notification (HTTP $HTTP_CODE)"
+          cat /tmp/slack-response.txt
+        fi

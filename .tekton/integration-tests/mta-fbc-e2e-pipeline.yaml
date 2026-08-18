@@ -233,3 +233,19 @@ spec:
             value: use_ocpctl_clusters
           - name: pathInRepo
             value: .tekton/tasks/ocpctl-cleanup.yaml
+
+    - name: slack-notification
+      params:
+        - name: testStatus
+          value: "$(tasks.run-e2e-tests.status)"
+        - name: pipelineRunName
+          value: "$(context.pipelineRun.name)"
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/migtools/mta-tackle2-ui
+          - name: revision
+            value: use_ocpctl_clusters
+          - name: pathInRepo
+            value: .tekton/tasks/slack-notification.yaml
