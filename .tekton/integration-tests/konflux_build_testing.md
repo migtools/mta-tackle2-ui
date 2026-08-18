@@ -5,11 +5,13 @@
 ### Application Types
 
 **`mta-8-2` Application:**
+
 - Builds 22 individual MTA container images (UI, Hub, Operator, Analyzers, etc.)
 - Snapshot created every time any component changes
 - Does **not** produce an FBC (File-Based Catalog) image
 
 **`fbc-mta-8-2` Application:**
+
 - Builds 1 FBC catalog image only
 - Snapshot created when complete MTA release is assembled
 - FBC references all 22 component images at validated versions
@@ -33,12 +35,13 @@ relatedImages:
 
 #### 2. **Snapshot Frequency**
 
-| Application | Snapshot Trigger | Frequency |
-|-------------|-----------------|-----------|
-| `mta-8-2` | Every component build | 100s per month |
-| `fbc-mta-8-2` | Release assembly only | ~5 per month |
+| Application   | Snapshot Trigger      | Frequency      |
+| ------------- | --------------------- | -------------- |
+| `mta-8-2`     | Every component build | 100s per month |
+| `fbc-mta-8-2` | Release assembly only | ~5 per month   |
 
 Running E2E tests on every component change would:
+
 - Waste OCPCTL cluster resources
 - Test incomplete/unvalidated component combinations
 - Cost $$$$$ in compute resources
@@ -46,6 +49,7 @@ Running E2E tests on every component change would:
 #### 3. **Pipeline Requirements**
 
 Our E2E pipeline requires an FBC image to:
+
 1. Create OLM CatalogSource
 2. Install operator via OLM
 3. OLM pulls all component images referenced in FBC
@@ -55,11 +59,13 @@ Our E2E pipeline requires an FBC image to:
 #### 4. **Release Alignment**
 
 **`mta-8-2` snapshot:**
+
 - Represents individual component update
 - May have incompatible component versions
 - Not what customers install
 
 **`fbc-mta-8-2` snapshot:**
+
 - Represents complete validated release (e.g., MTA 8.2.1)
 - All components validated to work together by ART team
 - Exactly what customers install via OLM
@@ -77,7 +83,7 @@ ART Release Assembly:
   - Validates all components work together
   - Creates FBC catalog with validated component versions
   - fbc-mta-8-2 creates 1 snapshot
-  
+
 Integration Tests:
   - Trigger on FBC snapshot
   - Deploy complete MTA 8.2.1 system
@@ -94,8 +100,9 @@ Testing individual component snapshots would be like testing car parts instead o
 ### Configuration
 
 **IntegrationTestScenario:**
+
 ```yaml
 name: mta-fbc-8-2-ui-e2e-test
-application: fbc-mta-8-2  # ✅ FBC application
+application: fbc-mta-8-2 # ✅ FBC application
 pipeline: mta-fbc-e2e-pipeline.yaml
 ```
