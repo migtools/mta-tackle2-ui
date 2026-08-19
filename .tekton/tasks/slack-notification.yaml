@@ -97,9 +97,16 @@ spec:
         EOF
         )
 
-        # Install curl
-        echo "Installing curl..."
-        microdnf install -y curl > /dev/null 2>&1
+        # Install curl if not already present
+        if ! command -v curl &> /dev/null; then
+          echo "Installing curl..."
+          if ! microdnf install -y curl; then
+            echo "❌ Failed to install curl"
+            exit 1
+          fi
+        else
+          echo "✓ curl already installed"
+        fi
 
         # Send to Slack
         echo "Sending notification to Slack..."
