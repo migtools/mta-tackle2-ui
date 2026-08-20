@@ -104,8 +104,8 @@ spec:
           exit 1
         fi
 
-        CLUSTER_ID=$(echo "$BODY" | python3 -c "import sys,json; data=json.load(sys.stdin); print(data.get('cluster', data).get('id', ''))")
-        CLUSTER_NAME=$(echo "$BODY" | python3 -c "import sys,json; data=json.load(sys.stdin); print(data.get('cluster', data).get('name', ''))")
+        CLUSTER_ID=$(echo "$BODY" | python3 -c "import sys,json; data=json.load(sys.stdin); print(data.get('cluster_id', ''))")
+        CLUSTER_NAME=$(echo "$BODY" | python3 -c "import sys,json; data=json.load(sys.stdin); print(data.get('cluster_name', ''))")
 
         if [ -z "$CLUSTER_ID" ]; then
           echo "❌ Failed to extract cluster ID from response"
