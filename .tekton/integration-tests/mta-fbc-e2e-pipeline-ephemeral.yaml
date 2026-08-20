@@ -4,29 +4,24 @@ metadata:
   name: mta-fbc-e2e-pipeline
 spec:
   description: |
-    Deploy MTA operator from FBC catalog to a leased pool cluster and run E2E tests.
-    Uses OCPCTL cluster pools for instant access to pre-provisioned clusters.
-    Faster than ephemeral clusters (no 15-30 min provision wait).
+    Deploy MTA operator from FBC catalog to ephemeral OCPCTL cluster and run E2E tests.
+    Uses modular reusable tasks from .tekton/tasks/ for cluster lifecycle and operator deployment.
 
   params:
     - name: SNAPSHOT
       description: Application Snapshot JSON
       type: string
-    - name: poolName
-      description: Name of the cluster pool to lease from
-      type: string
-      default: "ci-sno-pool-1"
 
   results:
     - name: IMAGE_VERIFICATION
       description: Pre-flight image pullability check status
       value: $(tasks.verify-image-pullable.results.verificationStatus)
-    - name: LEASE_STATUS
-      description: Pool cluster lease status
-      value: $(tasks.lease-cluster.results.leaseStatus)
+    - name: PROVISION_STATUS
+      description: Cluster provisioning status (READY, TIMEOUT, or FAILED)
+      value: $(tasks.provision-cluster.results.provisionStatus)
     - name: CLUSTER_NAME
-      description: Name of the leased cluster
-      value: $(tasks.lease-cluster.results.clusterName)
+      description: Name of the provisioned cluster
+      value: $(tasks.provision-cluster.results.clusterName)
     - name: DEPLOYMENT_STATUS
       description: Operator deployment status
       value: $(tasks.deploy-operator.results.deploymentStatus)
@@ -65,16 +60,12 @@ spec:
           - name: pathInRepo
             value: .tekton/tasks/verify-image-pullable.yaml
 
-    - name: lease-cluster
+    - name: provision-cluster
       runAfter:
         - verify-image-pullable
       params:
-        - name: poolName
-          value: $(params.poolName)
-        - name: leaseDuration
-          value: "4"
-        - name: purpose
-          value: "MTA FBC E2E Testing"
+        - name: clusterName
+          value: "$(context.pipelineRun.uid)"
       taskRef:
         resolver: git
         params:
@@ -83,30 +74,39 @@ spec:
           - name: revision
             value: slack_notification
           - name: pathInRepo
-            value: .tekton/tasks/ocpctl-pool-lease.yaml
+            value: .tekton/tasks/ocpctl-provision.yaml
 
-    - name: cleanup-existing-mta
+    - name: verify-provision
       runAfter:
-        - lease-cluster
+        - provision-cluster
       params:
-        - name: clusterId
-          value: $(tasks.lease-cluster.results.clusterId)
-      taskRef:
-        resolver: git
+        - name: provisionStatus
+          value: $(tasks.provision-cluster.results.provisionStatus)
+      taskSpec:
         params:
-          - name: url
-            value: https://github.com/migtools/mta-tackle2-ui
-          - name: revision
-            value: slack_notification
-          - name: pathInRepo
-            value: .tekton/tasks/cleanup-mta.yaml
+          - name: provisionStatus
+        steps:
+          - name: check-status
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            script: |
+              #!/bin/bash
+              STATUS="$(params.provisionStatus)"
+              echo "Cluster provision status: $STATUS"
+
+              if [ "$STATUS" != "READY" ]; then
+                echo "❌ Cluster provisioning failed or timed out"
+                echo "Cluster ID was saved and will be cleaned up in finally step"
+                exit 1
+              fi
+
+              echo "✅ Cluster is ready, proceeding with deployment"
 
     - name: deploy-operator
       runAfter:
-        - cleanup-existing-mta
+        - verify-provision
       params:
         - name: clusterId
-          value: $(tasks.lease-cluster.results.clusterId)
+          value: $(tasks.provision-cluster.results.clusterId)
         - name: fbcImage
           value: $(tasks.parse-metadata.results.component-container-image)
       taskRef:
@@ -176,7 +176,8 @@ spec:
 
               echo "Running all tests: @ci + @tier0-3 (excluding tests requiring secrets)"
 
-              # Build spec file list from tier tags
+              # Build spec file list from tier tags using the same approach as GitHub Actions
+              # Excluding @tier2_B because it includes JIRA tests requiring secrets
               TEST_TAGS="@ci,@tier0,@tier2_A,@tier3_A,@tier3_B,@tier3_C,@tier3_D,@tier3_E,@tier3_F"
               echo "Finding test files matching tags: $TEST_TAGS"
               ALL_SPEC_FILES=$(node scripts/findTierFiles.mjs "$TEST_TAGS")
@@ -189,7 +190,7 @@ spec:
 
               echo "Found $(echo "$ALL_SPEC_FILES" | tr ',' '\n' | wc -l) files with matching tags"
 
-              # Filter out files requiring secrets
+              # Filter out files requiring secrets (metrics, JIRA, Git, Maven, SVN, Proxy)
               echo "Excluding files requiring secrets..."
               SPEC_FILES=$(echo "$ALL_SPEC_FILES" | tr ',' '\n' | grep -v -E '(custom-metrics|jira|proxy|sourcecontrol_crud|maven_crud|repository/git|repository/maven|repository/subversion|export_to_jira|discovery\.test)' | tr '\n' ',' | sed 's/,$//')
 
@@ -199,9 +200,11 @@ spec:
                 exit 1
               fi
 
+              # Count how many files will be tested
               FILE_COUNT=$(echo "$SPEC_FILES" | tr ',' '\n' | wc -l)
-              echo "Found $FILE_COUNT test files to run"
+              echo "Found $FILE_COUNT test files to run (after excluding secret-requiring tests)"
 
+              # cypress-tags plugin filters individual tests within the matched files
               export CYPRESS_INCLUDE_TAGS="$TEST_TAGS"
 
               if npx dotenvx run -- npx cypress run \
@@ -215,14 +218,12 @@ spec:
               fi
 
   finally:
-    - name: release-cluster
-      when:
-        - input: "$(tasks.lease-cluster.status)"
-          operator: in
-          values: ["Succeeded"]
+    - name: cleanup-cluster
       params:
         - name: clusterId
-          value: $(tasks.lease-cluster.results.clusterId)
+          value: $(tasks.provision-cluster.results.clusterId)
+        - name: clusterName
+          value: "$(context.pipelineRun.uid)"
       taskRef:
         resolver: git
         params:
@@ -231,13 +232,9 @@ spec:
           - name: revision
             value: slack_notification
           - name: pathInRepo
-            value: .tekton/tasks/ocpctl-pool-release.yaml
+            value: .tekton/tasks/ocpctl-cleanup.yaml
 
     - name: slack-notification
-      when:
-        - input: "$(tasks.run-e2e-tests.status)"
-          operator: in
-          values: ["Succeeded", "Failed"]
       params:
         - name: testStatus
           value: "$(tasks.run-e2e-tests.status)"
