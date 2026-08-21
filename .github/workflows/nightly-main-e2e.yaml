@@ -1,9 +1,19 @@
 name: Nightly e2e (@main)
+#
+# Runs e2e tests using:
+#  - `:latest` images
+#  - use the konveyor-operator install konveyor action from `main`
+#  - use e2e test runner workflow from `main`
+#  - use UI e2e tests from `main`
+#
 
 on:
   workflow_dispatch:
   schedule:
     - cron: "0 0 * * *"
+
+permissions:
+  contents: read
 
 concurrency:
   group: e2e-nightly-${{ github.ref }}
@@ -28,7 +38,7 @@ jobs:
           - test_tags: "@authNeeded"
             auth_required: false
     name: "Nightly e2e - all tiers"
-    uses: ./.github/workflows/e2e-run-ui-tests.yaml
+    uses: konveyor/tackle2-ui/.github/workflows/e2e-run-ui-tests.yaml@main
     with:
       test_tags: ${{ matrix.test_tags }}
       feature_auth_required: ${{ matrix.auth_required }}
@@ -63,7 +73,7 @@ jobs:
           echo "timestamp=$(date +%s)" >> $GITHUB_OUTPUT
 
       - name: Send Slack notification
-        uses: slackapi/slack-github-action@v3
+        uses: slackapi/slack-github-action@v4
         with:
           webhook-type: incoming-webhook
           webhook: ${{ secrets.SLACK_WEBHOOK_URL }}

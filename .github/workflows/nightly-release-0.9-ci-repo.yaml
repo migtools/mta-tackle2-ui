@@ -6,6 +6,10 @@ on:
 
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   nightly:
     uses: konveyor/tackle2-ui/.github/workflows/ci-repo.yml@release-0.9

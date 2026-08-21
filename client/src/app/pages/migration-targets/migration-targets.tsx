@@ -15,20 +15,22 @@ import {
   arrayMove,
   rectSortingStrategy,
 } from "@dnd-kit/sortable";
-import { AxiosError, AxiosResponse } from "axios";
+import { AxiosError } from "axios";
 import { unique } from "radash";
 import { useTranslation } from "react-i18next";
 import {
   Button,
   Content,
   Gallery,
+  Modal,
+  ModalBody,
+  ModalHeader,
   PageSection,
   Toolbar,
   ToolbarContent,
   ToolbarGroup,
   ToolbarItem,
 } from "@patternfly/react-core";
-import { Modal } from "@patternfly/react-core/deprecated";
 import spacing from "@patternfly/react-styles/css/utilities/Spacing/spacing";
 
 import { Target } from "@app/api/models";
@@ -74,7 +76,7 @@ export const MigrationTargets: FC = () => {
 
   const [activeTarget, setActiveTarget] = useState<Target | null>(null);
 
-  const onDeleteTargetSuccess = (target: Target, id: number) => {
+  const onDeleteTargetSuccess = (id: number) => {
     pushNotification({
       title: "Custom target deleted",
       variant: "success",
@@ -97,11 +99,11 @@ export const MigrationTargets: FC = () => {
     onDeleteTargetError
   );
 
-  const onCustomTargetModalSaved = async (response: AxiosResponse<Target>) => {
+  const onCustomTargetModalSaved = async (target: Target) => {
     if (targetToUpdate) {
       pushNotification({
         title: t("toastr.success.saveWhat", {
-          what: response.data.name,
+          what: target.name,
           type: t("terms.customTarget"),
         }),
         variant: "success",
@@ -109,7 +111,7 @@ export const MigrationTargets: FC = () => {
     } else {
       pushNotification({
         title: t("toastr.success.createWhat", {
-          what: response.data.name,
+          what: target.name,
           type: t("terms.customTarget"),
         }),
         variant: "success",
@@ -126,7 +128,7 @@ export const MigrationTargets: FC = () => {
 
       // Make sure the new target's provider is part of the providers filter so it can be seen
       if (filterState.filterValues["provider"]) {
-        const targetProvider = response.data.provider;
+        const targetProvider = target.provider;
         const fv = filterState.filterValues["provider"];
         const newFv = !targetProvider
           ? null
@@ -325,19 +327,26 @@ export const MigrationTargets: FC = () => {
 
       <Modal
         id="create-edit-custom-target-modal"
-        title={t(targetToUpdate ? "dialog.title.update" : "dialog.title.new", {
-          what: `${t("terms.customTarget")}`,
-        })}
         variant="medium"
         isOpen={isCreateUpdateModalOpen}
         onClose={() => setCreateUpdateModalState(null)}
       >
-        <CustomTargetForm
-          target={targetToUpdate}
-          targetOrder={targetOrderSetting.data ?? []}
-          onSaved={onCustomTargetModalSaved}
-          onCancel={() => setCreateUpdateModalState(null)}
+        <ModalHeader
+          title={t(
+            targetToUpdate ? "dialog.title.update" : "dialog.title.new",
+            {
+              what: `${t("terms.customTarget")}`,
+            }
+          )}
         />
+        <ModalBody>
+          <CustomTargetForm
+            target={targetToUpdate}
+            targetOrder={targetOrderSetting.data ?? []}
+            onSaved={onCustomTargetModalSaved}
+            onCancel={() => setCreateUpdateModalState(null)}
+          />
+        </ModalBody>
       </Modal>
     </>
   );

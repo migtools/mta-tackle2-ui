@@ -9,7 +9,7 @@
 #   - https://github.com/konveyor/tackle2-ui/pull/1781
 
 # Builder image
-FROM registry.access.redhat.com/ubi10/nodejs-22:1782882936 AS builder
+FROM registry.access.redhat.com/ubi10/nodejs-22:1786514707 AS builder
 
 USER 1001
 COPY --chown=1001 . .
@@ -22,7 +22,7 @@ RUN \
   npm run dist
 
 # Runner image
-FROM registry.access.redhat.com/ubi10/nodejs-22-minimal:1782306530
+FROM registry.access.redhat.com/ubi10/nodejs-22-minimal:1786441349
 
 # Add ps package to allow liveness probe for k8s cluster
 # Add tar package to allow copying files with kubectl scp
@@ -32,20 +32,24 @@ RUN microdnf -y install tar procps-ng && microdnf clean all
 USER 1001
 
 LABEL name="konveyor/tackle2-ui" \
-      description="Konveyor for Tackle - User Interface" \
-      help="For more information visit https://konveyor.io" \
-      license="Apache License 2.0" \
-      maintainer="gdubreui@redhat.com,ibolton@redhat.com" \
-      summary="Konveyor for Tackle - User Interface" \
+      description="Konveyor - User Interface" \
+      summary="Konveyor UI provides the web-based frontend for managing application modernization workflows" \
       url="https://quay.io/konveyor/tackle2-ui" \
-      usage="podman run -p 80 -v konveyor/tackle2-ui:latest" \
+      help="For more information visit https://konveyor.io" \
+      license="Apache-2.0" \
+      maintainer="sdickers@redhat.com,rszwajko@redhat.com,ibolton@redhat.com" \
+      usage="podman run -p 8080:8080 konveyor/tackle2-ui:latest" \
       com.redhat.component="konveyor-tackle2-ui-container" \
       io.k8s.display-name="tackle2-ui" \
-      io.k8s.description="Konveyor for Tackle - User Interface" \
-      io.openshift.expose-services="80:http" \
-      io.openshift.tags="operator,konveyor,ui,nodejs18" \
-      io.openshift.min-cpu="100m" \
-      io.openshift.min-memory="350Mi"
+      io.k8s.description="Konveyor - User Interface" \
+      io.openshift.tags="operator,konveyor,ui,nodejs" \
+      org.opencontainers.image.title="tackle2-ui" \
+      org.opencontainers.image.description="Konveyor - User Interface" \
+      org.opencontainers.image.url="https://konveyor.io" \
+      org.opencontainers.image.source="https://github.com/konveyor/tackle2-ui" \
+      org.opencontainers.image.documentation="https://konveyor.io/docs" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.vendor="Konveyor"
 
 COPY --from=builder /opt/app-root/src/dist /opt/app-root/dist/
 

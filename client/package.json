@@ -41,7 +41,7 @@
     "i18next": "^26.3.1",
     "i18next-http-backend": "^4.0.0",
     "immer": "^10.2.0",
-    "js-yaml": "^4.3.0",
+    "js-yaml": "^4.3.1",
     "jwt-decode": "^4.0.0",
     "lodash-es": "^4.17.21",
     "monaco-editor": "^0.52.2",
@@ -101,7 +101,7 @@
     "tsconfig-paths-webpack-plugin": "^4.2.0",
     "webpack": "^5.105.3",
     "webpack-cli": "^6.0.1",
-    "webpack-dev-server": "^5.2.5",
+    "webpack-dev-server": "^5.2.6",
     "webpack-merge": "^6.0.1"
   },
   "browserslist": {
