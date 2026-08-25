@@ -56,8 +56,8 @@ spec:
           STATUS_TEXT="FAILED"
         fi
 
-        # Construct Konflux link
-        PIPELINE_LINK="https://console-openshift-console.apps.stone-prd-rh01.pg1f.p1.openshiftapps.com/k8s/ns/art-mta-tenant/tekton.dev~v1~PipelineRun/$PIPELINE_RUN"
+        # Construct Konflux UI link
+        PIPELINE_LINK="https://konflux-ui.apps.kflux-ocp-p01.7ayg.p1.openshiftapps.com/ns/art-mta-tenant/applications/fbc-mta-8-2/pipelineruns/$PIPELINE_RUN"
 
         # Construct message for Slack Workflow
         # Sends status and link variables to Slack workflow trigger
