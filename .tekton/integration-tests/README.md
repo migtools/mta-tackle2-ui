@@ -166,11 +166,11 @@ Sends test completion notification to Slack:
 - **OCPCTL URL**: `https://ocpctl.mg.dog8code.com`
 - **Pool**: `ci-sno-pool-1`
 - **Profile**: `aws-sno-ga`
-- **Namespace**: `konveyor-tackle` (formerly `openshift-mta`)
+- **Namespace**: `konveyor-tackle`
 - **Operator channel**: `stable-v8.1`
 - **Cluster version**: OpenShift 4.22.0
 - **Lease duration**: 4 hours (auto-release enabled)
-- **Total runtime**: ~1.7 hours (pool) vs ~2 hours (ephemeral)
+- **Total runtime**: ~1.7 hours
 
 ## Prerequisites
 
