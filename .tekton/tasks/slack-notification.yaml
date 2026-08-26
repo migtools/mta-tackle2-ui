@@ -21,6 +21,10 @@ spec:
     - name: pipelineRunName
       type: string
       description: Name of the pipeline run
+    - name: fbcImage
+      type: string
+      default: ""
+      description: FBC image reference with NVR (optional)
     - name: slackWebhookSecretName
       type: string
       default: "slack-webhook"
@@ -45,6 +49,7 @@ spec:
 
         TEST_STATUS="$(params.testStatus)"
         PIPELINE_RUN="$(params.pipelineRunName)"
+        FBC_IMAGE="$(params.fbcImage)"
 
         echo "Sending Slack notification for pipeline: $PIPELINE_RUN"
         echo "Test Status: $TEST_STATUS"
@@ -56,15 +61,32 @@ spec:
           STATUS_TEXT="FAILED"
         fi
 
+        # Extract NVR from FBC image
+        # Example: quay.io/redhat-user-workloads/ocp-art-tenant/art-fbc:mta-operator-fbc-8.2.1-20260820061824.ocp4.21
+        # Extract: mta-operator-fbc-8.2.1-20260820061824.ocp4.21
+        NVR=""
+        if [ -n "$FBC_IMAGE" ]; then
+          # Try to extract tag after last ':'
+          if echo "$FBC_IMAGE" | grep -q ':'; then
+            NVR=$(echo "$FBC_IMAGE" | sed 's/.*://')
+          fi
+          # If using digest (@sha256), extract from repo name
+          if [ -z "$NVR" ] || echo "$NVR" | grep -q '@sha256'; then
+            NVR="digest: $(echo "$FBC_IMAGE" | sed 's/.*@sha256:/sha256:/' | cut -c1-19)..."
+          fi
+          echo "NVR: $NVR"
+        fi
+
         # Construct Konflux UI link
         PIPELINE_LINK="https://konflux-ui.apps.kflux-ocp-p01.7ayg.p1.openshiftapps.com/ns/art-mta-tenant/applications/fbc-mta-8-2/pipelineruns/$PIPELINE_RUN"
 
         # Construct message for Slack Workflow
-        # Sends status and link variables to Slack workflow trigger
-        # Workflow template displays: "Test: {status}\nLink: {link}"
+        # Sends status, link, and nvr variables to Slack workflow trigger
+        # Workflow template should have: {{status}} - {{nvr}} - {{link}}
         MESSAGE=$(cat <<EOF
         {
           "status": "$STATUS_TEXT",
+          "nvr": "$NVR",
           "link": "$PIPELINE_LINK"
         }
         EOF
