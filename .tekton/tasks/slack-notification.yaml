@@ -24,7 +24,11 @@ spec:
     - name: fbcImage
       type: string
       default: ""
-      description: FBC image reference with NVR (optional)
+      description: FBC image reference (digest format)
+    - name: SNAPSHOT
+      type: string
+      default: ""
+      description: Konflux snapshot JSON (contains tagged image with NVR)
     - name: slackWebhookSecretName
       type: string
       default: "slack-webhook"
@@ -61,25 +65,42 @@ spec:
           STATUS_TEXT="FAILED"
         fi
 
-        # Extract NVR from FBC image
-        # Example: quay.io/.../art-fbc:mta-operator-fbc-8.2.1-20260820061824.ocp4.21
-        # Or: quay.io/.../art-fbc@sha256:28a2ebac183be8720a188f4a7951870279250b3f4f8f111c5368b62511d937cd
+        # Extract NVR from snapshot annotation (has tagged image with NVR)
+        # Snapshot annotation: test.appstudio.openshift.io/result-image-url
+        # Example: quay.io/.../art-fbc:mta-operator-fbc-8.2.1-20260826134724.ocp4.18
         NVR=""
-        if [ -n "$FBC_IMAGE" ]; then
-          echo "FBC Image: $FBC_IMAGE"
+        SNAPSHOT_JSON="$(params.SNAPSHOT)"
 
-          # Check if using digest format (@sha256:...)
+        if [ -n "$SNAPSHOT_JSON" ]; then
+          # Extract result-image-url from snapshot annotations
+          RESULT_IMAGE=$(echo "$SNAPSHOT_JSON" | python3 -c "
+import sys, json
+try:
+    snapshot = json.load(sys.stdin)
+    annotations = snapshot.get('metadata', {}).get('annotations', {})
+    result_url = annotations.get('test.appstudio.openshift.io/result-image-url', '')
+    print(result_url)
+except:
+    pass
+" 2>/dev/null || echo "")
+
+          if [ -n "$RESULT_IMAGE" ] && echo "$RESULT_IMAGE" | grep -q ':'; then
+            # Extract NVR from tag
+            NVR=$(echo "$RESULT_IMAGE" | sed 's/.*://')
+            echo "Extracted NVR from result-image-url: $NVR"
+          fi
+        fi
+
+        # Fallback to digest if no NVR found
+        if [ -z "$NVR" ] && [ -n "$FBC_IMAGE" ]; then
+          echo "Falling back to digest extraction from: $FBC_IMAGE"
           if echo "$FBC_IMAGE" | grep -q '@sha256:'; then
-            # Extract short digest (first 12 chars)
             DIGEST=$(echo "$FBC_IMAGE" | sed 's/.*@sha256://' | cut -c1-12)
             NVR="sha256:${DIGEST}"
-          else
-            # Extract tag after last ':'
-            NVR=$(echo "$FBC_IMAGE" | sed 's/.*://')
           fi
-
-          echo "Extracted NVR: $NVR"
         fi
+
+        echo "Final NVR: $NVR"
 
         # Construct Konflux UI link
         PIPELINE_LINK="https://konflux-ui.apps.kflux-ocp-p01.7ayg.p1.openshiftapps.com/ns/art-mta-tenant/applications/fbc-mta-8-2/pipelineruns/$PIPELINE_RUN"

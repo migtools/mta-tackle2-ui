@@ -166,6 +166,8 @@ spec:
           value: "$(context.pipelineRun.name)"
         - name: fbcImage
           value: "$(tasks.parse-metadata.results.component-container-image)"
+        - name: SNAPSHOT
+          value: "$(params.SNAPSHOT)"
       taskRef:
         resolver: git
         params:
