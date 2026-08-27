@@ -69,20 +69,11 @@ spec:
         # Snapshot annotation: test.appstudio.openshift.io/result-image-url
         # Example: quay.io/.../art-fbc:mta-operator-fbc-8.2.1-20260826134724.ocp4.18
         NVR=""
-        SNAPSHOT_JSON="$(params.SNAPSHOT)"
+        SNAPSHOT_JSON='$(params.SNAPSHOT)'
 
         if [ -n "$SNAPSHOT_JSON" ]; then
           # Extract result-image-url from snapshot annotations
-          RESULT_IMAGE=$(echo "$SNAPSHOT_JSON" | python3 -c "
-import sys, json
-try:
-    snapshot = json.load(sys.stdin)
-    annotations = snapshot.get('metadata', {}).get('annotations', {})
-    result_url = annotations.get('test.appstudio.openshift.io/result-image-url', '')
-    print(result_url)
-except:
-    pass
-" 2>/dev/null || echo "")
+          RESULT_IMAGE=$(echo "$SNAPSHOT_JSON" | python3 -c 'import sys, json; snapshot = json.load(sys.stdin); annotations = snapshot.get("metadata", {}).get("annotations", {}); print(annotations.get("test.appstudio.openshift.io/result-image-url", ""))' 2>/dev/null || echo "")
 
           if [ -n "$RESULT_IMAGE" ] && echo "$RESULT_IMAGE" | grep -q ':'; then
             # Extract NVR from tag
