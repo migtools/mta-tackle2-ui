@@ -58,6 +58,12 @@ spec:
         echo "Sending Slack notification for pipeline: $PIPELINE_RUN"
         echo "Test Status: $TEST_STATUS"
 
+        # Install jq if not present (needed for JSON parsing)
+        if ! command -v jq &> /dev/null; then
+          echo "Installing jq..."
+          microdnf install -y jq || echo "Warning: jq installation failed"
+        fi
+
         # Determine status text
         if [ "$TEST_STATUS" = "Succeeded" ]; then
           STATUS_TEXT="PASSED"
@@ -71,15 +77,19 @@ spec:
         NVR=""
         SNAPSHOT_JSON='$(params.SNAPSHOT)'
 
-        if [ -n "$SNAPSHOT_JSON" ]; then
-          # Extract result-image-url from snapshot annotations
-          RESULT_IMAGE=$(echo "$SNAPSHOT_JSON" | python3 -c 'import sys, json; snapshot = json.load(sys.stdin); annotations = snapshot.get("metadata", {}).get("annotations", {}); print(annotations.get("test.appstudio.openshift.io/result-image-url", ""))' 2>/dev/null || echo "")
+        if [ -n "$SNAPSHOT_JSON" ] && command -v jq &> /dev/null; then
+          # Extract result-image-url from snapshot annotations using jq
+          RESULT_IMAGE=$(echo "$SNAPSHOT_JSON" | jq -r '.metadata.annotations["test.appstudio.openshift.io/result-image-url"] // ""' 2>/dev/null || echo "")
 
           if [ -n "$RESULT_IMAGE" ] && echo "$RESULT_IMAGE" | grep -q ':'; then
             # Extract NVR from tag
             NVR=$(echo "$RESULT_IMAGE" | sed 's/.*://')
             echo "Extracted NVR from result-image-url: $NVR"
+          else
+            echo "No result-image-url found in snapshot or invalid format"
           fi
+        else
+          echo "SNAPSHOT parameter empty or jq not available"
         fi
 
         # Fallback to digest if no NVR found
