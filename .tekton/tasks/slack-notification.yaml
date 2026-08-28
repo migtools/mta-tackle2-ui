@@ -58,6 +58,14 @@ spec:
         echo "Sending Slack notification for pipeline: $PIPELINE_RUN"
         echo "Test Status: $TEST_STATUS"
 
+        # Install jq for JSON parsing
+        if ! command -v jq &> /dev/null; then
+          echo "Installing jq..."
+          microdnf install -y jq || {
+            echo "Warning: jq installation failed, NVR extraction will be skipped"
+          }
+        fi
+
         # Determine status text
         if [ "$TEST_STATUS" = "Succeeded" ]; then
           STATUS_TEXT="PASSED"
