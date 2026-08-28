@@ -1,0 +1,69 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: ocpctl-pool-release
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/categories: Deployment
+    tekton.dev/tags: ocpctl,openshift,cluster,pool
+    tekton.dev/displayName: "OCPCTL Release Cluster to Pool"
+spec:
+  description: >-
+    Release a leased cluster back to the OCPCTL cluster pool.
+
+  params:
+    - name: clusterId
+      type: string
+      description: UUID of the cluster to release
+    - name: ocpctlUrl
+      type: string
+      default: "https://ocpctl.mg.dog8code.com/api/v1"
+      description: OCPCTL API base URL
+    - name: ocpctlSecretName
+      type: string
+      default: "ocpctl-ci-key"
+      description: Name of the Kubernetes Secret containing the OCPCTL API key
+
+  results:
+    - name: releaseStatus
+      description: Release status (SUCCESS or FAILED)
+
+  steps:
+    - name: release-cluster
+      image: registry.access.redhat.com/ubi9/ubi@sha256:e79f79172a6779775e1733cb4f49cd5ef03a0703c68ec46c717f93b9ac4a5e71
+      env:
+        - name: OCPCTL_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: $(params.ocpctlSecretName)
+              key: api-key
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        OCPCTL_URL="$(params.ocpctlUrl)"
+        CLUSTER_ID="$(params.clusterId)"
+
+        echo "Releasing cluster back to pool: $CLUSTER_ID"
+
+        RESPONSE=$(curl -s -w "\n%{http_code}" \
+          -X POST "$OCPCTL_URL/pools/clusters/$CLUSTER_ID/release" \
+          -H "Authorization: Bearer $OCPCTL_API_KEY" \
+          -H "Content-Type: application/json")
+
+        HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+        BODY=$(echo "$RESPONSE" | sed '$d')
+
+        if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "202" ]; then
+          echo "⚠️ Cluster release request failed (HTTP $HTTP_CODE)"
+          echo "$BODY"
+          echo -n "FAILED" > $(results.releaseStatus.path)
+          # Don't exit 1 - release failure shouldn't fail the pipeline
+          # Auto-release will handle it after lease expires
+          exit 0
+        fi
+
+        echo "✅ Cluster released successfully to pool"
+        echo -n "SUCCESS" > $(results.releaseStatus.path)

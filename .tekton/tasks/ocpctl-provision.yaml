@@ -1,0 +1,202 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: ocpctl-provision
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/categories: Deployment
+    tekton.dev/tags: ocpctl,openshift,cluster
+    tekton.dev/displayName: "OCPCTL Provision Cluster"
+spec:
+  description: >-
+    Create an OpenShift cluster via OCPCTL API and wait until it reaches READY status.
+
+  params:
+    - name: clusterName
+      type: string
+      description: Name or UID seed for the cluster (auto-truncated to fit OCPCTL 21-char limit)
+    - name: profile
+      type: string
+      default: "aws-sno-ga"
+      description: OCPCTL cluster profile
+    - name: version
+      type: string
+      default: "4.21"
+      description: OpenShift version
+    - name: region
+      type: string
+      default: "us-east-1"
+      description: Cloud region
+    - name: baseDomain
+      type: string
+      default: "mg.dog8code.com"
+      description: Base domain for the cluster
+    - name: owner
+      type: string
+      default: "sshveta@redhat.com"
+      description: Cluster owner email
+    - name: team
+      type: string
+      default: "MTA-Engineering"
+      description: Team name
+    - name: costCenter
+      type: string
+      default: "733"
+      description: Cost center
+    - name: ocpctlUrl
+      type: string
+      default: "https://ocpctl.mg.dog8code.com/api/v1"
+      description: OCPCTL API base URL
+    - name: waitTimeout
+      type: string
+      default: "5400"
+      description: Timeout in seconds waiting for READY status
+    - name: ocpctlSecretName
+      type: string
+      default: "ocpctl-ci-key"
+      description: Name of the Kubernetes Secret containing the OCPCTL API key
+
+  results:
+    - name: clusterName
+      description: Name of the created cluster
+    - name: clusterId
+      description: UUID of the created cluster (always set, even if wait fails)
+    - name: provisionStatus
+      description: Provisioning status (READY or FAILED)
+
+  steps:
+    - name: create-cluster
+      image: registry.access.redhat.com/ubi9/ubi@sha256:e79f79172a6779775e1733cb4f49cd5ef03a0703c68ec46c717f93b9ac4a5e71
+      env:
+        - name: OCPCTL_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: $(params.ocpctlSecretName)
+              key: api-key
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        # Install python3 for JSON parsing if not already present
+        if ! command -v python3 &> /dev/null; then
+          echo "Installing python3..."
+          if ! microdnf install -y python3; then
+            echo "❌ Failed to install python3 - cannot parse OCPCTL API responses"
+            exit 1
+          fi
+        else
+          echo "✓ python3 already installed"
+        fi
+
+        OCPCTL_URL="$(params.ocpctlUrl)"
+        RAW_NAME="$(params.clusterName)"
+        CLUSTER_NAME="mta-$(echo "$RAW_NAME" | tr -d '-' | head -c 13)"
+
+        echo "Creating OCPCTL cluster: $CLUSTER_NAME"
+        echo "  profile=$(params.profile) version=$(params.version) region=$(params.region)"
+
+        RESPONSE=$(curl -s -w "\n%{http_code}" \
+          -X POST "$OCPCTL_URL/clusters" \
+          -H "Authorization: Bearer $OCPCTL_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"name\": \"$CLUSTER_NAME\",
+            \"platform\": \"aws\",
+            \"cluster_type\": \"openshift\",
+            \"version\": \"$(params.version)\",
+            \"profile\": \"$(params.profile)\",
+            \"region\": \"$(params.region)\",
+            \"base_domain\": \"$(params.baseDomain)\",
+            \"owner\": \"$(params.owner)\",
+            \"team\": \"$(params.team)\",
+            \"cost_center\": \"$(params.costCenter)\"
+          }")
+
+        HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+        BODY=$(echo "$RESPONSE" | sed '$d')
+
+        if [ "$HTTP_CODE" != "201" ]; then
+          echo "❌ Cluster creation failed (HTTP $HTTP_CODE)"
+          echo "$BODY"
+          exit 1
+        fi
+
+        CLUSTER_ID=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+        echo "✅ Cluster created: $CLUSTER_NAME (ID: $CLUSTER_ID)"
+
+        echo -n "$CLUSTER_NAME" > $(results.clusterName.path)
+        echo -n "$CLUSTER_ID" > $(results.clusterId.path)
+
+    - name: wait-for-ready
+      image: registry.access.redhat.com/ubi9/ubi@sha256:e79f79172a6779775e1733cb4f49cd5ef03a0703c68ec46c717f93b9ac4a5e71
+      env:
+        - name: OCPCTL_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: $(params.ocpctlSecretName)
+              key: api-key
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        # Install python3 for JSON parsing if not already present
+        if ! command -v python3 &> /dev/null; then
+          echo "Installing python3..."
+          if ! microdnf install -y python3; then
+            echo "❌ Failed to install python3 - cannot parse OCPCTL API responses"
+            exit 1
+          fi
+        else
+          echo "✓ python3 already installed"
+        fi
+
+        OCPCTL_URL="$(params.ocpctlUrl)"
+        CLUSTER_ID=$(cat $(results.clusterId.path))
+        TIMEOUT=$(params.waitTimeout)
+        INTERVAL=30
+        ELAPSED=0
+
+        echo "Waiting for cluster $CLUSTER_ID to reach READY (timeout: ${TIMEOUT}s)..."
+
+        while true; do
+          RESPONSE=$(curl -s --max-time 30 --retry 3 --retry-delay 5 \
+            -H "Authorization: Bearer $OCPCTL_API_KEY" \
+            "$OCPCTL_URL/clusters/$CLUSTER_ID" || echo "")
+
+          STATUS=$(echo "$RESPONSE" | python3 -c "
+        import sys, json
+        try:
+            data = json.load(sys.stdin)
+            cluster = data.get('cluster', data)
+            print(cluster.get('status', 'UNKNOWN').upper())
+        except:
+            print('UNKNOWN')
+        " || echo "UNKNOWN")
+
+          echo "Status: $STATUS ($ELAPSED/${TIMEOUT}s)"
+
+          if [ "$STATUS" = "READY" ]; then
+            echo "✅ Cluster is READY"
+            echo -n "READY" > $(results.provisionStatus.path)
+            exit 0
+          fi
+
+          if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "DESTROY_FAILED" ]; then
+            echo "❌ Cluster reached failure status: $STATUS"
+            echo -n "FAILED" > $(results.provisionStatus.path)
+            # Do NOT exit 1 - we need clusterId available for cleanup
+            exit 0
+          fi
+
+          if [ $ELAPSED -ge $TIMEOUT ]; then
+            echo "❌ Timed out waiting for cluster. Last status: $STATUS"
+            echo -n "TIMEOUT" > $(results.provisionStatus.path)
+            # Do NOT exit 1 - we need clusterId available for cleanup
+            exit 0
+          fi
+
+          sleep $INTERVAL
+          ELAPSED=$((ELAPSED + INTERVAL))
+        done
