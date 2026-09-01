@@ -14,7 +14,7 @@ Uses OCPCTL cluster pools to lease pre-provisioned clusters for instant access a
 3. **Deploy operator from FBC** - Install MTA operator using the FBC catalog image
 4. **Run E2E tests** - Execute comprehensive Cypress test suite
 5. **Release cluster** - Return cluster to pool for reuse
-6. **Slack notification** - Send test results with NVR and Konflux link
+6. **Slack notification** - Send test results with status and Konflux link
 
 **Benefits:**
 - ⚡ **Instant cluster access** (no 15-30 min provision wait)
@@ -61,7 +61,7 @@ The pipeline is composed of modular Tekton Tasks in `.tekton/tasks/`. Each task 
 
 | Task                    | File                                       | Description                                      |
 | ----------------------- | ------------------------------------------ | ------------------------------------------------ |
-| `slack-notification`    | `.tekton/tasks/slack-notification.yaml`    | Send test results to Slack with NVR and link     |
+| `slack-notification`    | `.tekton/tasks/slack-notification.yaml`    | Send test results to Slack with status and link  |
 
 ### Using tasks in another pipeline
 
@@ -158,8 +158,8 @@ Returns the leased cluster to the pool (always runs, even on failure):
 Sends test completion notification to Slack:
 
 - **Conditional:** Only runs if tests actually executed (not if lease failed)
-- Includes: Test status, NVR, Konflux UI link
-- Format: `{status: "PASSED", nvr: "mta-operator-container-8.2.1-...", link: "..."}`
+- Includes: Test status, Konflux UI link
+- Format: `{status: "PASSED", pipeline: "https://konflux-ui.apps..."}`
 
 ## Configuration
 
@@ -218,12 +218,11 @@ The pipeline sends test completion notifications to Slack. This requires a Slack
 
 1. Go to your Slack workspace
 2. Create a new Workflow with the trigger type "Webhook"
-3. Add variables: `status`, `nvr`, `link`
+3. Add variables: `status`, `pipeline`
 4. Configure message template (example):
    ```
    Test: {{status}}
-   NVR: {{nvr}}
-   <{{link}}|View Pipeline>
+   <{{pipeline}}|View Pipeline>
    ```
 5. Publish the workflow and copy the webhook URL
 
@@ -232,13 +231,11 @@ The pipeline sends test completion notifications to Slack. This requires a Slack
 ```json
 {
   "status": "PASSED" | "FAILED",
-  "nvr": "mta-operator-container-8.2.1-202608112039.p2.g240a021.assembly.stream.el9",
-  "link": "https://konflux-ui.apps.kflux-ocp-p01.7ayg.p1.openshiftapps.com/ns/art-mta-tenant/applications/fbc-mta-8-2/pipelineruns/mta-fbc-8-2-ui-e2e-test-xxxxx"
+  "pipeline": "https://konflux-ui.apps.kflux-ocp-p01.7ayg.p1.openshiftapps.com/ns/art-mta-tenant/applications/fbc-mta-8-2/pipelineruns/mta-fbc-8-2-ui-e2e-test-xxxxx"
 }
 ```
 
 **Features:**
-- ✅ **NVR extraction:** Automatically extracts build NVR from FBC image tag
 - 🔗 **Konflux UI link:** Direct link to pipeline run in Konflux UI (not raw OpenShift console)
 - 🎯 **Conditional:** Only sends notification if tests actually ran (not on lease failures)
 
