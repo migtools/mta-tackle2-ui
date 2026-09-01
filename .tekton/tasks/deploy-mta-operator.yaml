@@ -1,0 +1,375 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: deploy-mta-operator
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/categories: Deployment
+    tekton.dev/tags: mta,operator,openshift
+    tekton.dev/displayName: "Deploy MTA Operator"
+spec:
+  description: >-
+    Install MTA operator from an FBC catalog image on a target cluster.
+    Downloads kubeconfig from OCPCTL, optionally configures registry mirroring,
+    installs the operator via OLM, creates Tackle CR, and waits for MTA UI readiness.
+
+  params:
+    - name: clusterId
+      type: string
+      description: OCPCTL cluster UUID (used to download kubeconfig)
+    - name: fbcImage
+      type: string
+      description: FBC catalog image reference
+    - name: packageName
+      type: string
+      default: "mta-operator"
+      description: Operator package name
+    - name: channelName
+      type: string
+      default: "stable-v8.2"
+      description: OLM subscription channel
+    - name: operatorNamespace
+      type: string
+      default: "openshift-mta"
+      description: Namespace to install the operator
+    - name: configureRegistryMirror
+      type: string
+      default: "true"
+      description: Apply ImageDigestMirrorSet for registry.redhat.io → registry.stage.redhat.io
+    - name: ocpctlUrl
+      type: string
+      default: "https://ocpctl.mg.dog8code.com/api/v1"
+      description: OCPCTL API base URL
+    - name: ocpctlSecretName
+      type: string
+      default: "ocpctl-ci-key"
+      description: Name of the Kubernetes Secret containing the OCPCTL API key
+    - name: registryPullSecretName
+      type: string
+      default: "registry-pull-secrets"
+      description: Name of the Kubernetes Secret containing stage registry pull credentials
+
+  results:
+    - name: deploymentStatus
+      description: Deployment status (SUCCESS or FAILED)
+    - name: csvName
+      description: Installed ClusterServiceVersion name
+    - name: uiRoute
+      description: MTA UI route hostname
+
+  volumes:
+    - name: credentials
+      emptyDir: {}
+    - name: stage-pull-secret
+      secret:
+        secretName: $(params.registryPullSecretName)
+
+  steps:
+    - name: get-kubeconfig
+      image: registry.access.redhat.com/ubi9/ubi@sha256:e79f79172a6779775e1733cb4f49cd5ef03a0703c68ec46c717f93b9ac4a5e71
+      volumeMounts:
+        - name: credentials
+          mountPath: /credentials
+      env:
+        - name: OCPCTL_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: $(params.ocpctlSecretName)
+              key: api-key
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        OCPCTL_URL="$(params.ocpctlUrl)"
+        CLUSTER_ID="$(params.clusterId)"
+        KUBECONFIG_PATH="/credentials/kubeconfig"
+
+        echo "Downloading kubeconfig for cluster $CLUSTER_ID..."
+
+        # Step 1: Get pre-signed download URL from OCPCTL API
+        DOWNLOAD_URL_RESPONSE=$(curl -s -H "Authorization: Bearer $OCPCTL_API_KEY" \
+          "$OCPCTL_URL/clusters/$CLUSTER_ID/kubeconfig/download-url")
+
+        # Extract download URL using grep/sed (no jq available)
+        DOWNLOAD_URL=$(echo "$DOWNLOAD_URL_RESPONSE" | grep -o '"download_url":"[^"]*"' | cut -d'"' -f4 | sed 's/\\u0026/\&/g')
+
+        if [ -z "$DOWNLOAD_URL" ]; then
+          echo "❌ Failed to get kubeconfig download URL"
+          echo "Response: $DOWNLOAD_URL_RESPONSE"
+          exit 1
+        fi
+
+        echo "Got download URL (expires in 15 minutes)"
+
+        # Step 2: Download kubeconfig from S3 pre-signed URL
+        HTTP_CODE=$(curl -s -o "$KUBECONFIG_PATH" -w "%{http_code}" "$DOWNLOAD_URL")
+
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "❌ Failed to download kubeconfig from S3 (HTTP $HTTP_CODE)"
+          cat "$KUBECONFIG_PATH"
+          exit 1
+        fi
+
+        echo "✅ Kubeconfig downloaded successfully"
+
+    - name: configure-pull-secret
+      image: quay.io/openshift/origin-cli:4.21
+      volumeMounts:
+        - name: credentials
+          mountPath: /credentials
+        - name: stage-pull-secret
+          mountPath: /stage-pull-secret
+      env:
+        - name: KUBECONFIG
+          value: /credentials/kubeconfig
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        echo "Merging stage registry credentials into cluster pull secret..."
+
+        oc get secret pull-secret -n openshift-config -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d > /tmp/cluster-pull.json
+        cp /stage-pull-secret/.dockerconfigjson /tmp/stage-pull.json
+
+        MERGED=$(python3 -c "
+        import json
+        with open('/tmp/cluster-pull.json') as f: cluster = json.load(f)
+        with open('/tmp/stage-pull.json') as f: stage = json.load(f)
+        cluster['auths'].update(stage.get('auths', {}))
+        print(json.dumps(cluster))
+        ")
+
+        echo "$MERGED" > /tmp/merged-pull-secret.json
+        oc set data secret/pull-secret -n openshift-config --from-file=.dockerconfigjson=/tmp/merged-pull-secret.json
+
+        echo "Registries in pull secret:"
+        echo "$MERGED" | python3 -c "import sys,json; print('\n'.join(sorted(json.load(sys.stdin)['auths'].keys())))"
+        echo "✅ Stage registry credentials merged"
+
+    - name: configure-registry-mirror
+      image: quay.io/openshift/origin-cli:4.21
+      volumeMounts:
+        - name: credentials
+          mountPath: /credentials
+      env:
+        - name: KUBECONFIG
+          value: /credentials/kubeconfig
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        if [ "$(params.configureRegistryMirror)" != "true" ]; then
+          echo "Registry mirror configuration skipped"
+          exit 0
+        fi
+
+        echo "Configuring registry mirror: registry.redhat.io → registry.stage.redhat.io"
+
+        cat <<EOF | oc apply -f -
+        apiVersion: config.openshift.io/v1
+        kind: ImageDigestMirrorSet
+        metadata:
+          name: stage-registry-mirror
+        spec:
+          imageDigestMirrors:
+            - source: registry.redhat.io
+              mirrors:
+                - registry.stage.redhat.io
+        EOF
+
+        echo "✅ ImageDigestMirrorSet applied"
+        echo "Waiting for MachineConfigPool to finish updating..."
+        oc wait mcp master --for=condition=Updated --timeout=600s
+        echo "✅ MachineConfigPool updated"
+
+    - name: install-operator
+      image: quay.io/openshift/origin-cli:4.21
+      volumeMounts:
+        - name: credentials
+          mountPath: /credentials
+      env:
+        - name: KUBECONFIG
+          value: /credentials/kubeconfig
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+        trap 'echo "FAILED" > $(results.deploymentStatus.path)' ERR
+
+        FBC_IMAGE="$(params.fbcImage)"
+        PACKAGE_NAME="$(params.packageName)"
+        CHANNEL_NAME="$(params.channelName)"
+        NAMESPACE="$(params.operatorNamespace)"
+
+        oc create namespace "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -
+
+        echo "Cleaning up previous installation (if any)..."
+        oc delete tackle mta -n "$NAMESPACE" --ignore-not-found --timeout=120s 2>/dev/null || true
+        oc delete subscription mta-operator -n "$NAMESPACE" --ignore-not-found 2>/dev/null || true
+        oc get csv -n "$NAMESPACE" -o name 2>/dev/null | xargs -r oc delete -n "$NAMESPACE" --ignore-not-found 2>/dev/null || true
+        oc delete catalogsource mta-konflux-catalog -n openshift-marketplace --ignore-not-found 2>/dev/null || true
+        oc delete operatorgroup mta-operator-group -n "$NAMESPACE" --ignore-not-found 2>/dev/null || true
+        sleep 10
+        echo "✅ Previous installation cleaned up"
+
+        cat <<EOF | oc apply -f -
+        apiVersion: operators.coreos.com/v1alpha1
+        kind: CatalogSource
+        metadata:
+          name: mta-konflux-catalog
+          namespace: openshift-marketplace
+        spec:
+          sourceType: grpc
+          image: $FBC_IMAGE
+          displayName: MTA Konflux Catalog
+          publisher: Red Hat
+          grpcPodConfig:
+            securityContextConfig: restricted
+            extractContent:
+              catalogDir: /configs
+              cacheDir: /tmp/cache
+          updateStrategy:
+            registryPoll:
+              interval: 10m
+        EOF
+
+        for i in {1..60}; do
+          STATE=$(oc get catalogsource mta-konflux-catalog -n openshift-marketplace -o jsonpath='{.status.connectionState.lastObservedState}' 2>/dev/null || echo "")
+          if [ "$STATE" = "READY" ]; then
+            echo "✅ CatalogSource READY"
+            break
+          fi
+          if [ $i -eq 60 ]; then
+            echo "FAILED" > $(results.deploymentStatus.path)
+            exit 1
+          fi
+          sleep 5
+        done
+
+        cat <<EOF | oc apply -f -
+        apiVersion: operators.coreos.com/v1
+        kind: OperatorGroup
+        metadata:
+          name: mta-operator-group
+          namespace: $NAMESPACE
+        spec:
+          targetNamespaces:
+            - $NAMESPACE
+        EOF
+
+        cat <<EOF | oc apply -f -
+        apiVersion: operators.coreos.com/v1alpha1
+        kind: Subscription
+        metadata:
+          name: mta-operator
+          namespace: $NAMESPACE
+        spec:
+          channel: $CHANNEL_NAME
+          installPlanApproval: Automatic
+          name: $PACKAGE_NAME
+          source: mta-konflux-catalog
+          sourceNamespace: openshift-marketplace
+        EOF
+
+        echo "Waiting for operator installation (15 minute timeout)..."
+        sleep 10
+
+        CSV=""
+        PHASE=""
+        for i in {1..180}; do
+          CSV=$(oc get subscription mta-operator -n "$NAMESPACE" -o jsonpath='{.status.installedCSV}' 2>/dev/null || echo "")
+          if [ -n "$CSV" ]; then
+            PHASE=$(oc get csv "$CSV" -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+            if [ "$PHASE" = "Succeeded" ]; then
+              echo "✅ Operator installed: $CSV"
+              echo "$CSV" > $(results.csvName.path)
+              break
+            fi
+          fi
+
+          if [ $((i % 12)) -eq 0 ]; then
+            echo "Waiting for CSV... ($i/180)"
+          fi
+          sleep 5
+        done
+
+        if [ -z "$CSV" ] || [ "$PHASE" != "Succeeded" ]; then
+          echo "❌ Operator installation failed or timed out after 15 minutes"
+          echo "CSV: $CSV, Phase: ${PHASE:-not set}"
+          echo ""
+          echo "Diagnostics:"
+          echo "Subscription status:"
+          oc get subscription mta-operator -n "$NAMESPACE" -o yaml 2>/dev/null | grep -A 20 "status:" || echo "  No subscription status"
+          echo ""
+          echo "InstallPlans:"
+          oc get installplan -n "$NAMESPACE" 2>/dev/null || echo "  No InstallPlans found"
+          echo ""
+          echo "Events:"
+          oc get events -n "$NAMESPACE" --sort-by='.lastTimestamp' 2>/dev/null | tail -10 || echo "  No events"
+          echo "FAILED" > $(results.deploymentStatus.path)
+          exit 1
+        fi
+
+        oc wait --for=condition=available --timeout=300s deployment/mta-operator -n "$NAMESPACE"
+
+        cat <<EOF | oc apply -f -
+        apiVersion: tackle.konveyor.io/v1alpha1
+        kind: Tackle
+        metadata:
+          name: mta
+          namespace: $NAMESPACE
+        spec:
+          provider_c_sharp_container_requests_memory: 512Mi
+          provider_c_sharp_container_limits_memory: 512Mi
+          provider_c_sharp_container_requests_cpu: 500m
+          provider_c_sharp_container_limits_cpu: 500m
+          language_discovery_container_limits_cpu: 500m
+          language_discovery_container_requests_cpu: 500m
+          language_discovery_container_limits_memory: 512Mi
+          language_discovery_container_requests_memory: 512Mi
+          analyzer_container_limits_cpu: 500m
+          analyzer_container_requests_cpu: 500m
+          analyzer_container_limits_memory: 512Mi
+          analyzer_container_requests_memory: 512Mi
+          provider_generic_container_limits_cpu: 500m
+          provider_generic_container_requests_cpu: 500m
+          provider_generic_container_limits_memory: 512Mi
+          provider_generic_container_requests_memory: 512Mi
+          provider_nodejs_container_limits_cpu: 500m
+          provider_nodejs_container_requests_cpu: 500m
+          provider_nodejs_container_limits_memory: 512Mi
+          provider_nodejs_container_requests_memory: 512Mi
+          hub_bucket_volume_size: "25Gi"
+          cache_data_volume_size: "25Gi"
+          feature_auth_required: "true"
+        EOF
+
+        echo "Waiting for MTA UI deployment to be created..."
+        for i in {1..120}; do
+          if oc get deployment mta-ui -n "$NAMESPACE" &>/dev/null; then
+            echo "✅ MTA UI deployment exists"
+            break
+          fi
+          if [ $i -eq 120 ]; then
+            echo "ERROR: MTA UI deployment not created after 10 minutes"
+            echo "FAILED" > $(results.deploymentStatus.path)
+            exit 1
+          fi
+          sleep 5
+        done
+
+        echo "Waiting for MTA UI deployment to roll out..."
+        oc rollout status deployment/mta-ui -n "$NAMESPACE" --timeout=900s
+
+        UI_ROUTE=$(oc get route mta -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+        if [ -z "$UI_ROUTE" ]; then
+          echo "ERROR: Could not get MTA route"
+          echo "FAILED" > $(results.deploymentStatus.path)
+          exit 1
+        fi
+
+        echo "✅ MTA UI: https://$UI_ROUTE"
+        echo -n "$UI_ROUTE" > $(results.uiRoute.path)
+
+        echo "SUCCESS" > $(results.deploymentStatus.path)

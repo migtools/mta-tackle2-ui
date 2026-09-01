@@ -1,0 +1,122 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: ocpctl-pool-lease
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/categories: Deployment
+    tekton.dev/tags: ocpctl,openshift,cluster,pool
+    tekton.dev/displayName: "OCPCTL Lease Cluster from Pool"
+spec:
+  description: >-
+    Lease a pre-provisioned cluster from an OCPCTL cluster pool.
+
+  params:
+    - name: poolName
+      type: string
+      default: "ci-sno-pool-1"
+      description: Name of the cluster pool to lease from
+    - name: leaseDuration
+      type: string
+      default: "4"
+      description: Lease duration in hours (max 8 for ci-sno-pool-1)
+    - name: purpose
+      type: string
+      default: "MTA E2E Testing"
+      description: Purpose of the lease for tracking
+    - name: ocpctlUrl
+      type: string
+      default: "https://ocpctl.mg.dog8code.com/api/v1"
+      description: OCPCTL API base URL
+    - name: ocpctlSecretName
+      type: string
+      default: "ocpctl-ci-key"
+      description: Name of the Kubernetes Secret containing the OCPCTL API key
+
+  results:
+    - name: clusterId
+      description: UUID of the leased cluster
+    - name: clusterName
+      description: Name of the leased cluster
+    - name: leaseStatus
+      description: Lease status (SUCCESS or FAILED)
+
+  steps:
+    - name: lease-cluster
+      image: registry.access.redhat.com/ubi9/ubi@sha256:e79f79172a6779775e1733cb4f49cd5ef03a0703c68ec46c717f93b9ac4a5e71
+      env:
+        - name: OCPCTL_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: $(params.ocpctlSecretName)
+              key: api-key
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        # Install python3 for JSON parsing if not already present
+        if ! command -v python3 &> /dev/null; then
+          echo "Installing python3..."
+          if ! microdnf install -y python3; then
+            echo "❌ Failed to install python3"
+            exit 1
+          fi
+        else
+          echo "✓ python3 already installed"
+        fi
+
+        OCPCTL_URL="$(params.ocpctlUrl)"
+        POOL_NAME="$(params.poolName)"
+        LEASE_DURATION="$(params.leaseDuration)"
+        PURPOSE="$(params.purpose)"
+
+        echo "Leasing cluster from pool: $POOL_NAME"
+        echo "  Duration: ${LEASE_DURATION}h"
+        echo "  Purpose: $PURPOSE"
+
+        RESPONSE=$(curl -s -w "\n%{http_code}" \
+          -X POST "$OCPCTL_URL/pools/$POOL_NAME/lease" \
+          -H "Authorization: Bearer $OCPCTL_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"lease_duration_hours\": $LEASE_DURATION,
+            \"purpose\": \"$PURPOSE\"
+          }")
+
+        HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+        BODY=$(echo "$RESPONSE" | sed '$d')
+
+        if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; then
+          echo "❌ Cluster lease failed (HTTP $HTTP_CODE)"
+          echo "$BODY"
+
+          # Check if it's a pool exhaustion error
+          if echo "$BODY" | grep -iq "no.*available\|pool.*empty\|no.*ready"; then
+            echo ""
+            echo "⚠️  POOL EXHAUSTED: No clusters available in pool '$POOL_NAME'"
+            echo "   This is expected when multiple tests run concurrently."
+            echo "   The pipeline will fail early without consuming resources."
+          fi
+
+          echo -n "FAILED" > $(results.leaseStatus.path)
+          exit 1
+        fi
+
+        CLUSTER_ID=$(echo "$BODY" | python3 -c "import sys,json; data=json.load(sys.stdin); print(data.get('cluster_id', ''))")
+        CLUSTER_NAME=$(echo "$BODY" | python3 -c "import sys,json; data=json.load(sys.stdin); print(data.get('cluster_name', ''))")
+
+        if [ -z "$CLUSTER_ID" ]; then
+          echo "❌ Failed to extract cluster ID from response"
+          echo "$BODY"
+          exit 1
+        fi
+
+        echo "✅ Cluster leased successfully"
+        echo "   Cluster ID: $CLUSTER_ID"
+        echo "   Cluster Name: $CLUSTER_NAME"
+
+        echo -n "$CLUSTER_ID" > $(results.clusterId.path)
+        echo -n "$CLUSTER_NAME" > $(results.clusterName.path)
+        echo -n "SUCCESS" > $(results.leaseStatus.path)

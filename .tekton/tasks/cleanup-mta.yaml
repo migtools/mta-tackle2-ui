@@ -1,0 +1,123 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: cleanup-mta
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/categories: Deployment
+    tekton.dev/tags: mta,cleanup,openshift
+    tekton.dev/displayName: "Cleanup MTA Operator"
+spec:
+  description: >-
+    Clean up existing MTA operator installation from a cluster.
+    Removes Tackle CR, Subscription, CatalogSource, and Namespace.
+
+  params:
+    - name: clusterId
+      type: string
+      description: UUID of the cluster to clean up
+    - name: ocpctlUrl
+      type: string
+      default: "https://ocpctl.mg.dog8code.com/api/v1"
+      description: OCPCTL API base URL
+    - name: ocpctlSecretName
+      type: string
+      default: "ocpctl-ci-key"
+      description: Name of the Kubernetes Secret containing the OCPCTL API key
+
+  results:
+    - name: cleanupStatus
+      description: Cleanup status (SUCCESS or FAILED)
+
+  steps:
+    - name: cleanup
+      image: registry.redhat.io/openshift4/ose-cli:latest
+      env:
+        - name: OCPCTL_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: $(params.ocpctlSecretName)
+              key: api-key
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        OCPCTL_URL="$(params.ocpctlUrl)"
+        CLUSTER_ID="$(params.clusterId)"
+
+        echo "Downloading kubeconfig for cluster: $CLUSTER_ID"
+
+        curl -s -o /tmp/kubeconfig \
+          -H "Authorization: Bearer $OCPCTL_API_KEY" \
+          "$OCPCTL_URL/clusters/$CLUSTER_ID/kubeconfig"
+
+        if [ ! -s /tmp/kubeconfig ]; then
+          echo "❌ Failed to download kubeconfig"
+          echo -n "FAILED" > $(results.cleanupStatus.path)
+          exit 1
+        fi
+
+        export KUBECONFIG=/tmp/kubeconfig
+
+        echo "Checking for existing MTA installation..."
+
+        # Check if konveyor-tackle namespace exists
+        if ! oc get namespace konveyor-tackle &>/dev/null; then
+          echo "✅ No existing MTA installation found"
+          echo -n "SUCCESS" > $(results.cleanupStatus.path)
+          exit 0
+        fi
+
+        echo "Found existing MTA installation, cleaning up..."
+
+        # Delete Tackle CR (this triggers operator to clean up workloads)
+        if oc get tackle -n konveyor-tackle &>/dev/null; then
+          echo "Deleting Tackle CR..."
+          oc delete tackle --all -n konveyor-tackle --wait=false || true
+
+          # Wait for Tackle CR to be removed (with timeout)
+          TIMEOUT=300
+          ELAPSED=0
+          while oc get tackle -n konveyor-tackle &>/dev/null && [ $ELAPSED -lt $TIMEOUT ]; do
+            echo "Waiting for Tackle CR deletion... ($ELAPSED/${TIMEOUT}s)"
+            sleep 10
+            ELAPSED=$((ELAPSED + 10))
+          done
+        fi
+
+        # Delete Subscription
+        if oc get subscription -n konveyor-tackle &>/dev/null; then
+          echo "Deleting MTA Subscription..."
+          oc delete subscription --all -n konveyor-tackle --wait=false || true
+        fi
+
+        # Delete CSV
+        if oc get csv -n konveyor-tackle &>/dev/null; then
+          echo "Deleting MTA CSV..."
+          oc delete csv --all -n konveyor-tackle --wait=false || true
+        fi
+
+        # Delete CatalogSource
+        if oc get catalogsource mta-fbc-catalog -n openshift-marketplace &>/dev/null; then
+          echo "Deleting CatalogSource..."
+          oc delete catalogsource mta-fbc-catalog -n openshift-marketplace || true
+        fi
+
+        # Delete ImageDigestMirrorSet
+        if oc get imagedigestmirrorset mta-redhat-io-mirror &>/dev/null; then
+          echo "Deleting ImageDigestMirrorSet..."
+          oc delete imagedigestmirrorset mta-redhat-io-mirror || true
+        fi
+
+        # Delete namespace
+        echo "Deleting konveyor-tackle namespace..."
+        oc delete namespace konveyor-tackle --wait=false || true
+
+        # Wait a bit for cleanup to start
+        sleep 10
+
+        echo "✅ Cleanup initiated successfully"
+        echo "Note: Full cleanup may take a few minutes to complete in background"
+        echo -n "SUCCESS" > $(results.cleanupStatus.path)

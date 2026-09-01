@@ -1,0 +1,129 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: run-ui-e2e-tests
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/categories: Test
+    tekton.dev/tags: cypress,e2e,ui,mta
+    tekton.dev/displayName: "Run MTA UI E2E Tests"
+spec:
+  description: >-
+    Run Cypress E2E tests against deployed MTA UI.
+    Clones tackle2-ui repository, installs dependencies, and executes test suite.
+
+  params:
+    - name: uiRoute
+      type: string
+      description: MTA UI route (hostname only, without https://)
+    - name: gitRepository
+      type: string
+      default: "https://github.com/migtools/mta-tackle2-ui.git"
+      description: tackle2-ui repository URL
+    - name: gitBranch
+      type: string
+      default: "main"
+      description: Branch to clone for tests
+    - name: testTags
+      type: string
+      default: "@ci,@tier0,@tier2_A,@tier3_A,@tier3_B,@tier3_C,@tier3_D,@tier3_E,@tier3_F"
+      description: Comma-separated test tags to include
+    - name: excludePattern
+      type: string
+      default: "(custom-metrics|jira|proxy|sourcecontrol_crud|maven_crud|repository/git|repository/maven|repository/subversion|export_to_jira|discovery\\.test)"
+      description: Regex pattern for test files to exclude (requires secrets)
+
+  results:
+    - name: testStatus
+      description: Test execution status (PASSED or FAILED)
+
+  stepTemplate:
+    computeResources:
+      requests:
+        memory: 4Gi
+        cpu: "2"
+      limits:
+        memory: 8Gi
+        cpu: "4"
+
+  steps:
+    - name: run-tests
+      image: cypress/included:15.7.0
+      env:
+        - name: CYPRESS_CACHE_FOLDER
+          value: /tmp/.cache/Cypress
+        - name: npm_config_cache
+          value: /tmp/.cache/npm
+        - name: NODE_TLS_REJECT_UNAUTHORIZED
+          value: "0"
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+        trap 'echo "FAILED" > $(results.testStatus.path)' ERR
+
+        echo "Installing curl and jq for test utilities..."
+        apt-get update -qq && apt-get install -y -qq curl jq > /dev/null 2>&1
+
+        UI_ROUTE="$(params.uiRoute)"
+        BASE_URL="https://${UI_ROUTE}"
+
+        echo "MTA UI URL: $BASE_URL"
+
+        echo "Cloning tackle2-ui repository..."
+        cd /tmp
+        git clone --depth 1 --branch $(params.gitBranch) $(params.gitRepository)
+        cd mta-tackle2-ui
+
+        echo "Installing dependencies..."
+        npm clean-install --ignore-scripts --no-audit
+        npx cypress install
+
+        cd cypress
+        cp .env.example .env
+
+        echo "Running tests with tags: $(params.testTags)"
+        echo "Excluding pattern: $(params.excludePattern)"
+
+        # Build spec file list from tier tags
+        TEST_TAGS="$(params.testTags)"
+        echo "Finding test files matching tags: $TEST_TAGS"
+        ALL_SPEC_FILES=$(node scripts/findTierFiles.mjs "$TEST_TAGS")
+
+        if [ -z "$ALL_SPEC_FILES" ]; then
+          echo "ERROR: No test files found matching tags: $TEST_TAGS"
+          echo "FAILED" > $(results.testStatus.path)
+          exit 1
+        fi
+
+        echo "Found $(echo "$ALL_SPEC_FILES" | tr ',' '\n' | wc -l) files with matching tags"
+
+        # Filter out files requiring secrets
+        echo "Excluding files requiring secrets..."
+        EXCLUDE_PATTERN="$(params.excludePattern)"
+        SPEC_FILES=$(echo "$ALL_SPEC_FILES" | tr ',' '\n' | grep -v -E "$EXCLUDE_PATTERN" | tr '\n' ',' | sed 's/,$//')
+
+        if [ -z "$SPEC_FILES" ]; then
+          echo "ERROR: No test files remaining after filtering secrets"
+          echo "FAILED" > $(results.testStatus.path)
+          exit 1
+        fi
+
+        FILE_COUNT=$(echo "$SPEC_FILES" | tr ',' '\n' | wc -l)
+        echo "Running $FILE_COUNT test files"
+
+        # cypress-tags plugin filters individual tests within the matched files
+        export CYPRESS_INCLUDE_TAGS="$TEST_TAGS"
+
+        if npx dotenvx run -- npx cypress run \
+          --spec "$SPEC_FILES" \
+          --config-file cypress.config.ts \
+          --config baseUrl="$BASE_URL",chromeWebSecurity=false,video=false; then
+          echo "✅ Tests PASSED"
+          echo "PASSED" > $(results.testStatus.path)
+        else
+          echo "❌ Tests FAILED"
+          echo "FAILED" > $(results.testStatus.path)
+          exit 1
+        fi
