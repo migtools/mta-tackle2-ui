@@ -79,12 +79,16 @@ spec:
         #!/bin/bash
         set -euo pipefail
 
-        # Install python3 for JSON parsing (UBI9 minimal doesn't include it)
-        echo "Installing python3..."
-        microdnf install -y python3 > /dev/null 2>&1 || {
-          echo "❌ Failed to install python3 - cannot parse OCPCTL API responses"
-          exit 1
-        }
+        # Install python3 for JSON parsing if not already present
+        if ! command -v python3 &> /dev/null; then
+          echo "Installing python3..."
+          if ! microdnf install -y python3; then
+            echo "❌ Failed to install python3 - cannot parse OCPCTL API responses"
+            exit 1
+          fi
+        else
+          echo "✓ python3 already installed"
+        fi
 
         OCPCTL_URL="$(params.ocpctlUrl)"
         RAW_NAME="$(params.clusterName)"
@@ -137,12 +141,16 @@ spec:
         #!/bin/bash
         set -euo pipefail
 
-        # Install python3 for JSON parsing (UBI9 minimal doesn't include it)
-        echo "Installing python3..."
-        microdnf install -y python3 > /dev/null 2>&1 || {
-          echo "❌ Failed to install python3 - cannot parse OCPCTL API responses"
-          exit 1
-        }
+        # Install python3 for JSON parsing if not already present
+        if ! command -v python3 &> /dev/null; then
+          echo "Installing python3..."
+          if ! microdnf install -y python3; then
+            echo "❌ Failed to install python3 - cannot parse OCPCTL API responses"
+            exit 1
+          fi
+        else
+          echo "✓ python3 already installed"
+        fi
 
         OCPCTL_URL="$(params.ocpctlUrl)"
         CLUSTER_ID=$(cat $(results.clusterId.path))

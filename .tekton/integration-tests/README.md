@@ -4,12 +4,31 @@
 
 This custom integration test pipeline validates MTA operator deployments using File-Based Catalog (FBC) images from Konflux snapshots.
 
-**Pipeline workflow:**
+## Pool-Based Architecture
 
-1. **Provision ephemeral cluster** - Creates a temporary OpenShift cluster via OCPCTL API
-2. **Deploy operator from FBC** - Installs MTA operator using the FBC catalog image from the snapshot
-3. **Run E2E tests** - Executes Cypress login test to validate the deployment
-4. **Cleanup** - Deletes the ephemeral cluster (runs always, even on failure)
+Uses OCPCTL cluster pools to lease pre-provisioned clusters for instant access and cost efficiency.
+
+**Workflow:**
+
+1. **Lease cluster** - Get pre-provisioned cluster from pool (instant!)
+2. **Cleanup existing MTA** - Remove any previous MTA installation
+3. **Deploy operator from FBC** - Install MTA operator using the FBC catalog image
+4. **Run E2E tests** - Execute comprehensive Cypress test suite
+5. **Release cluster** - Return cluster to pool for reuse
+6. **Slack notification** - Send test results with status and Konflux link
+
+**Benefits:**
+
+- ⚡ **Instant cluster access** (no 15-30 min provision wait)
+- 💰 **Cost-effective** (reuses clusters vs provisioning new ones each time)
+- 🎯 **Reliable** (no provision timeout failures)
+- 🔄 **Auto-release** (clusters automatically returned after lease expires)
+
+**Requirements:**
+
+- **OCPCTL cluster pool:** Pool must have available ready clusters
+- **Auto-refresh enabled:** Pool setting `auto_refresh_enabled: true` prevents 7-day expiration issues
+- **Pool capacity:** At least 1-2 clusters for concurrent testing
 
 ## Why Custom Pipeline
 
@@ -23,12 +42,29 @@ We use a custom pipeline instead of Konflux's built-in `deploy-fbc-operator` pip
 
 The pipeline is composed of modular Tekton Tasks in `.tekton/tasks/`. Each task can be referenced independently by any Konflux ITS pipeline:
 
+### Cluster Lifecycle Tasks
+
+| Task                  | File                                     | Description                                   |
+| --------------------- | ---------------------------------------- | --------------------------------------------- |
+| `ocpctl-pool-lease`   | `.tekton/tasks/ocpctl-pool-lease.yaml`   | Lease pre-provisioned cluster from pool       |
+| `ocpctl-pool-release` | `.tekton/tasks/ocpctl-pool-release.yaml` | Release cluster back to pool                  |
+| `ocpctl-provision`    | `.tekton/tasks/ocpctl-provision.yaml`    | Provision ephemeral cluster + wait for READY  |
+| `ocpctl-cleanup`      | `.tekton/tasks/ocpctl-cleanup.yaml`      | Delete ephemeral cluster + wait for DESTROYED |
+| `cleanup-mta`         | `.tekton/tasks/cleanup-mta.yaml`         | Remove existing MTA installation from cluster |
+
+### Deployment & Testing Tasks
+
 | Task                    | File                                       | Description                                      |
 | ----------------------- | ------------------------------------------ | ------------------------------------------------ |
-| `ocpctl-provision`      | `.tekton/tasks/ocpctl-provision.yaml`      | Create OCPCTL cluster + wait for READY           |
-| `ocpctl-cleanup`        | `.tekton/tasks/ocpctl-cleanup.yaml`        | Delete OCPCTL cluster + wait for DESTROYED       |
-| `deploy-mta-operator`   | `.tekton/tasks/deploy-mta-operator.yaml`   | Deploy MTA operator from FBC image               |
 | `verify-image-pullable` | `.tekton/tasks/verify-image-pullable.yaml` | Pre-flight check to verify FBC image is pullable |
+| `deploy-mta-operator`   | `.tekton/tasks/deploy-mta-operator.yaml`   | Deploy MTA operator from FBC image               |
+| `run-ui-e2e-tests`      | `.tekton/tasks/run-ui-e2e-tests.yaml`      | Run Cypress E2E tests against deployed MTA UI    |
+
+### Notification Tasks
+
+| Task                 | File                                    | Description                                     |
+| -------------------- | --------------------------------------- | ----------------------------------------------- |
+| `slack-notification` | `.tekton/tasks/slack-notification.yaml` | Send test results to Slack with status and link |
 
 ### Using tasks in another pipeline
 
@@ -54,22 +90,43 @@ Reference any task via the Tekton git resolver:
 
 All tasks use sensible defaults — only required params need to be provided.
 
-## Pipeline Steps
+## Pipeline Steps (Pool-Based)
 
 ### 1. parse-metadata
 
 Extracts the FBC image reference from the Konflux snapshot.
 
-### 2. provision-cluster
+### 2. verify-image-pullable
 
-Provisions an ephemeral cluster via OCPCTL REST API (`https://ocpctl.mg.dog8code.com`):
+Pre-flight check to ensure FBC image exists and is pullable before leasing a cluster.
 
+### 3. lease-cluster
+
+Leases a pre-provisioned cluster from OCPCTL pool (`ci-sno-pool-1`):
+
+- Pool: `ci-sno-pool-1`
 - Profile: `aws-sno-ga` (Single-Node OpenShift on AWS)
-- OpenShift version: 4.21
-- Region: us-east-1
-- Polls until cluster reaches `READY` status (timeout: 60 minutes)
+- OpenShift version: 4.22.0
+- Lease duration: 4 hours (auto-release after expiry)
+- **Instant access** - no provision wait time
 
-### 3. deploy-operator
+**Failure modes:**
+
+- If pool has 0 ready clusters → Pipeline fails fast (under 1 minute)
+- No wasted compute resources on unavailable clusters
+
+### 4. cleanup-existing-mta
+
+Removes any previous MTA installation from the leased cluster:
+
+- Deletes Tackle CR (triggers operator cleanup)
+- Removes Subscription, CSV, CatalogSource
+- Deletes ImageDigestMirrorSet
+- Removes `konveyor-tackle` namespace
+
+**Why needed:** Pool clusters are reused, so previous test installations must be cleaned up.
+
+### 5. deploy-operator
 
 Installs and configures the MTA operator:
 
@@ -81,30 +138,43 @@ Installs and configures the MTA operator:
 - Waits for MTA UI deployment to be ready
 - Retrieves MTA UI route and Keycloak credentials
 
-### 4. run-e2e-tests
+### 6. run-e2e-tests
 
-Runs Cypress login test:
+Runs comprehensive Cypress E2E test suite:
 
-- Clones `migtools/mta-tackle2-ui` repository
-- Executes `e2e/tests/login.test.ts` against deployed MTA instance
-- Validates authentication flow and UI accessibility
+- Clones `migtools/mta-tackle2-ui` repository (main branch)
+- Installs dependencies and Cypress
+- Executes test suite with tags: `@ci`, `@tier0`, `@tier2_A`, `@tier3_A-F`
+- Excludes tests requiring secrets (JIRA, metrics, Git, Maven, etc.)
+- **Includes `jq` installation** for test data seeding scripts
+- Returns `PASSED` or `FAILED` status
 
-### 5. cleanup-cluster (finally)
+### 7. release-cluster (finally)
 
-Deletes the OCPCTL cluster regardless of pipeline success or failure:
+Returns the leased cluster to the pool (always runs, even on failure):
 
-- Sends DELETE request to OCPCTL API
-- Waits for `DESTROYED` status (timeout: 30 minutes)
-- Non-blocking: does not fail the pipeline if cleanup times out
+- Sends release request to OCPCTL API
+- Cluster becomes available for next test
+- **Non-blocking:** Failure doesn't fail pipeline (auto-release handles it)
+
+### 8. slack-notification (finally)
+
+Sends test completion notification to Slack:
+
+- **Conditional:** Only runs if tests actually executed (not if lease failed)
+- Includes: Test status, Konflux UI link
+- Format: `{status: "PASSED", pipeline: "https://konflux-ui.apps..."}`
 
 ## Configuration
 
 - **OCPCTL URL**: `https://ocpctl.mg.dog8code.com`
+- **Pool**: `ci-sno-pool-1`
 - **Profile**: `aws-sno-ga`
-- **Namespace**: `openshift-mta`
+- **Namespace**: `konveyor-tackle`
 - **Operator channel**: `stable-v8.1`
-- **Cluster version**: OpenShift 4.21
-- **Total runtime**: ~30-45 minutes
+- **Cluster version**: OpenShift 4.22.0
+- **Lease duration**: 4 hours (auto-release enabled)
+- **Total runtime**: ~1.7 hours
 
 ## Prerequisites
 
@@ -136,6 +206,43 @@ Create via Konflux UI: Secrets → Add secret.
 - **Type**: `kubernetes.io/dockerconfigjson`
 - **Key**: `.dockerconfigjson`
 - **Value**: Docker config JSON with `registry.stage.redhat.io` credentials
+
+### Slack Notifications
+
+The pipeline sends test completion notifications to Slack. This requires a Slack Workflow webhook URL configured as a Kubernetes Secret.
+
+**Required Secret** (create in Konflux workspace):
+
+- **Secret name**: `slack-webhook`
+- **Type**: `Opaque`
+- **Key**: `url`
+- **Value**: Slack workflow trigger URL (e.g., `https://hooks.slack.com/triggers/...`)
+
+**How to set up a Slack Workflow:**
+
+1. Go to your Slack workspace
+2. Create a new Workflow with the trigger type "Webhook"
+3. Add variables: `status`, `pipeline`
+4. Configure message template (example):
+   ```
+   Test: {{status}}
+   <{{pipeline}}|View Pipeline>
+   ```
+5. Publish the workflow and copy the webhook URL
+
+**Notification payload:**
+
+```json
+{
+  "status": "PASSED" | "FAILED",
+  "pipeline": "https://konflux-ui.apps.kflux-ocp-p01.7ayg.p1.openshiftapps.com/ns/art-mta-tenant/applications/fbc-mta-8-2/pipelineruns/mta-fbc-8-2-ui-e2e-test-xxxxx"
+}
+```
+
+**Features:**
+
+- 🔗 **Konflux UI link:** Direct link to pipeline run in Konflux UI (not raw OpenShift console)
+- 🎯 **Conditional:** Only sends notification if tests actually ran (not on lease failures)
 
 ## Adding a New Pipeline for a New MTA Version
 
