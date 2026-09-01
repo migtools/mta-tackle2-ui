@@ -9,6 +9,7 @@ This custom integration test pipeline validates MTA operator deployments using F
 Uses OCPCTL cluster pools to lease pre-provisioned clusters for instant access and cost efficiency.
 
 **Workflow:**
+
 1. **Lease cluster** - Get pre-provisioned cluster from pool (instant!)
 2. **Cleanup existing MTA** - Remove any previous MTA installation
 3. **Deploy operator from FBC** - Install MTA operator using the FBC catalog image
@@ -17,12 +18,14 @@ Uses OCPCTL cluster pools to lease pre-provisioned clusters for instant access a
 6. **Slack notification** - Send test results with status and Konflux link
 
 **Benefits:**
+
 - ⚡ **Instant cluster access** (no 15-30 min provision wait)
 - 💰 **Cost-effective** (reuses clusters vs provisioning new ones each time)
 - 🎯 **Reliable** (no provision timeout failures)
 - 🔄 **Auto-release** (clusters automatically returned after lease expires)
 
 **Requirements:**
+
 - **OCPCTL cluster pool:** Pool must have available ready clusters
 - **Auto-refresh enabled:** Pool setting `auto_refresh_enabled: true` prevents 7-day expiration issues
 - **Pool capacity:** At least 1-2 clusters for concurrent testing
@@ -41,13 +44,13 @@ The pipeline is composed of modular Tekton Tasks in `.tekton/tasks/`. Each task 
 
 ### Cluster Lifecycle Tasks
 
-| Task                    | File                                       | Description                                      |
-| ----------------------- | ------------------------------------------ | ------------------------------------------------ |
-| `ocpctl-pool-lease`     | `.tekton/tasks/ocpctl-pool-lease.yaml`     | Lease pre-provisioned cluster from pool          |
-| `ocpctl-pool-release`   | `.tekton/tasks/ocpctl-pool-release.yaml`   | Release cluster back to pool                     |
-| `ocpctl-provision`      | `.tekton/tasks/ocpctl-provision.yaml`      | Provision ephemeral cluster + wait for READY     |
-| `ocpctl-cleanup`        | `.tekton/tasks/ocpctl-cleanup.yaml`        | Delete ephemeral cluster + wait for DESTROYED    |
-| `cleanup-mta`           | `.tekton/tasks/cleanup-mta.yaml`           | Remove existing MTA installation from cluster    |
+| Task                  | File                                     | Description                                   |
+| --------------------- | ---------------------------------------- | --------------------------------------------- |
+| `ocpctl-pool-lease`   | `.tekton/tasks/ocpctl-pool-lease.yaml`   | Lease pre-provisioned cluster from pool       |
+| `ocpctl-pool-release` | `.tekton/tasks/ocpctl-pool-release.yaml` | Release cluster back to pool                  |
+| `ocpctl-provision`    | `.tekton/tasks/ocpctl-provision.yaml`    | Provision ephemeral cluster + wait for READY  |
+| `ocpctl-cleanup`      | `.tekton/tasks/ocpctl-cleanup.yaml`      | Delete ephemeral cluster + wait for DESTROYED |
+| `cleanup-mta`         | `.tekton/tasks/cleanup-mta.yaml`         | Remove existing MTA installation from cluster |
 
 ### Deployment & Testing Tasks
 
@@ -59,9 +62,9 @@ The pipeline is composed of modular Tekton Tasks in `.tekton/tasks/`. Each task 
 
 ### Notification Tasks
 
-| Task                    | File                                       | Description                                      |
-| ----------------------- | ------------------------------------------ | ------------------------------------------------ |
-| `slack-notification`    | `.tekton/tasks/slack-notification.yaml`    | Send test results to Slack with status and link  |
+| Task                 | File                                    | Description                                     |
+| -------------------- | --------------------------------------- | ----------------------------------------------- |
+| `slack-notification` | `.tekton/tasks/slack-notification.yaml` | Send test results to Slack with status and link |
 
 ### Using tasks in another pipeline
 
@@ -101,13 +104,14 @@ Pre-flight check to ensure FBC image exists and is pullable before leasing a clu
 
 Leases a pre-provisioned cluster from OCPCTL pool (`ci-sno-pool-1`):
 
-- Pool: `ci-sno-pool-1` 
+- Pool: `ci-sno-pool-1`
 - Profile: `aws-sno-ga` (Single-Node OpenShift on AWS)
 - OpenShift version: 4.22.0
 - Lease duration: 4 hours (auto-release after expiry)
 - **Instant access** - no provision wait time
 
 **Failure modes:**
+
 - If pool has 0 ready clusters → Pipeline fails fast (under 1 minute)
 - No wasted compute resources on unavailable clusters
 
@@ -236,6 +240,7 @@ The pipeline sends test completion notifications to Slack. This requires a Slack
 ```
 
 **Features:**
+
 - 🔗 **Konflux UI link:** Direct link to pipeline run in Konflux UI (not raw OpenShift console)
 - 🎯 **Conditional:** Only sends notification if tests actually ran (not on lease failures)
 
