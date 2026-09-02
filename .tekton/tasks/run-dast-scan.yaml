@@ -43,7 +43,7 @@ spec:
         cd rapidast
         git checkout development
 
-        echo "✅ RapiDAST cloned successfully"
+        echo "OK: RapiDAST cloned successfully"
 
     - name: connect-to-cluster
       image: registry.redhat.io/openshift4/ose-cli:latest
@@ -74,7 +74,7 @@ spec:
         oc whoami
         oc get nodes
 
-        echo "✅ Connected to cluster successfully"
+        echo "OK: Connected to cluster successfully"
 
     - name: disable-auth
       image: registry.redhat.io/openshift4/ose-cli:latest
@@ -113,10 +113,10 @@ spec:
           oc wait --for=condition=Ready pod -l app.kubernetes.io/name=mta-ui \
             -n openshift-mta --timeout=300s
 
-          echo "✅ Authentication disabled"
+          echo "OK: Authentication disabled"
           echo "true" > /workspace/auth-was-enabled
         else
-          echo "✓ Authentication already disabled"
+          echo "OK: Authentication already disabled"
           echo "false" > /workspace/auth-was-enabled
         fi
 
@@ -132,36 +132,37 @@ spec:
         echo "Creating DAST configuration..."
         echo "Hub URL: $HUB_URL"
 
-        cat > /workspace/dast-config.yaml <<EOF
-config:
-  configVersion: 5
-  base_results_dir: "/workspace/dast-results"
+        # Create DAST configuration file
+        {
+          echo "config:"
+          echo "  configVersion: 5"
+          echo "  base_results_dir: \"/workspace/dast-results\""
+          echo ""
+          echo "application:"
+          echo "  shortName: \"MTA\""
+          echo "  url: \"$HUB_URL\""
+          echo ""
+          echo "general:"
+          echo "  container:"
+          echo "    type: \"podman\""
+          echo ""
+          echo "scanners:"
+          echo "  zap:"
+          echo "    apiScan:"
+          echo "      apis:"
+          echo "        apiUrl: \"https://raw.githubusercontent.com/konveyor/tackle2-hub/main/docs/openapi3.json\""
+          echo ""
+          echo "    passiveScan:"
+          echo "      disabledRules: \"2,10015,10024,10027,10054,10096,10109,10112\""
+          echo ""
+          echo "    activeScan:"
+          echo "      policy: \"API-scan-minimal\""
+          echo ""
+          echo "    miscOptions:"
+          echo "      additionalAddons: \"ascanrulesBeta\""
+        } > /workspace/dast-config.yaml
 
-application:
-  shortName: "MTA"
-  url: "$HUB_URL"
-
-general:
-  container:
-    type: "podman"
-
-scanners:
-  zap:
-    apiScan:
-      apis:
-        apiUrl: "https://raw.githubusercontent.com/konveyor/tackle2-hub/main/docs/openapi3.json"
-
-    passiveScan:
-      disabledRules: "2,10015,10024,10027,10054,10096,10109,10112"
-
-    activeScan:
-      policy: "API-scan-minimal"
-
-    miscOptions:
-      additionalAddons: "ascanrulesBeta"
-EOF
-
-        echo "✅ DAST configuration created"
+        echo "DAST configuration created"
         cat /workspace/dast-config.yaml
 
     - name: run-dast
@@ -179,7 +180,7 @@ EOF
         pipenv run pip install -r requirements.txt
 
         echo "Starting DAST scan..."
-        echo "⚠️  This may take 30-60 minutes..."
+        echo "WARNING:  This may take 30-60 minutes..."
 
         mkdir -p /workspace/dast-results
 
@@ -187,11 +188,11 @@ EOF
         pipenv run python rapidast.py \
           --config /workspace/dast-config.yaml \
           --log-level debug || {
-            echo "⚠️  DAST scan encountered issues (exit code: $?)"
+            echo "WARNING:  DAST scan encountered issues (exit code: $?)"
             echo "Continuing to process results..."
           }
 
-        echo "✅ DAST scan completed"
+        echo "OK: DAST scan completed"
 
         # List results
         echo "Scan results:"
@@ -199,9 +200,9 @@ EOF
 
         # Check for report
         if [ -f /workspace/dast-results/zap-report.html ]; then
-          echo "✅ ZAP report generated"
+          echo "OK: ZAP report generated"
         else
-          echo "⚠️  No ZAP report found"
+          echo "WARNING:  No ZAP report found"
         fi
 
     - name: re-enable-auth
@@ -232,9 +233,9 @@ EOF
           oc wait --for=condition=Ready pod -l app.kubernetes.io/name=mta-ui \
             -n openshift-mta --timeout=300s
 
-          echo "✅ Authentication re-enabled"
+          echo "OK: Authentication re-enabled"
         else
-          echo "✓ Authentication was not modified, no action needed"
+          echo "OK: Authentication was not modified, no action needed"
         fi
 
     - name: process-results
@@ -259,7 +260,7 @@ EOF
         # Check for critical findings (you can customize this logic)
         # For now, just mark as succeeded if scan completed
         echo "Succeeded" > $(results.scanStatus.path)
-        echo "✅ DAST scan results processed"
+        echo "OK: DAST scan results processed"
 
   workspaces:
     []
