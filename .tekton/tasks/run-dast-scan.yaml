@@ -85,9 +85,24 @@ spec:
 
         echo "Checking if MTA authentication is enabled..."
 
-        # Check if auth is enabled
-        FEATURE_AUTH_ENABLED=$(oc get tackle tackle -n openshift-mta -o json | \
-          jq -r '.spec.feature_auth_required // "false"')
+        # Check if MTA is deployed
+        if ! oc get crd tackles.tackle.konveyor.io &>/dev/null; then
+          echo "ERROR: MTA CRD not found - MTA may not be deployed"
+          exit 1
+        fi
+
+        if ! oc get tackle tackle -n openshift-mta &>/dev/null; then
+          echo "ERROR: MTA Tackle CR not found in openshift-mta namespace"
+          exit 1
+        fi
+
+        # Check if auth is enabled (parse JSON without jq)
+        FEATURE_AUTH_ENABLED=$(oc get tackle tackle -n openshift-mta -o jsonpath='{.spec.feature_auth_required}')
+
+        # Default to false if empty
+        if [ -z "$FEATURE_AUTH_ENABLED" ]; then
+          FEATURE_AUTH_ENABLED="false"
+        fi
 
         echo "feature_auth_required: $FEATURE_AUTH_ENABLED"
 
