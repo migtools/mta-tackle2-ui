@@ -72,7 +72,6 @@ spec:
 
         # Verify connection
         oc whoami
-        oc get nodes
 
         echo "OK: Connected to cluster successfully"
 
