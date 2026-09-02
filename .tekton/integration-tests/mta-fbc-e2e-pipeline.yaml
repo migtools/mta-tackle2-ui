@@ -33,6 +33,9 @@ spec:
     - name: TEST_OUTPUT
       description: Test execution result
       value: $(tasks.run-e2e-tests.results.testStatus)
+    - name: DAST_SCAN
+      description: DAST security scan result
+      value: $(tasks.run-dast-scan.results.scanStatus)
 
   tasks:
     - name: parse-metadata
@@ -119,9 +122,27 @@ spec:
           - name: pathInRepo
             value: .tekton/tasks/deploy-mta-operator.yaml
 
-    - name: run-e2e-tests
+    - name: run-dast-scan
       runAfter:
         - deploy-operator
+      params:
+        - name: clusterId
+          value: $(tasks.lease-cluster.results.clusterId)
+        - name: mtaRoute
+          value: $(tasks.deploy-operator.results.uiRoute)
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/migtools/mta-tackle2-ui
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: .tekton/tasks/run-dast-scan.yaml
+
+    - name: run-e2e-tests
+      runAfter:
+        - run-dast-scan
       params:
         - name: uiRoute
           value: $(tasks.deploy-operator.results.uiRoute)
