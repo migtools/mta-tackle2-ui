@@ -55,11 +55,35 @@ spec:
         SNAPSHOT_JSON='$(params.snapshotJson)'
         PIPELINE_RUN="$(params.pipelineRunName)"
 
+        # DEBUG: Show what we received
+        echo "=== DEBUG: SNAPSHOT JSON (first 500 chars) ==="
+        echo "$SNAPSHOT_JSON" | head -c 500
+        echo ""
+        echo "=== END DEBUG ==="
+        echo ""
+
         # Extract snapshot name from JSON (no jq available)
-        SNAPSHOT_NAME=$(echo "$SNAPSHOT_JSON" | grep -o '"name":"[^"]*"' | head -1 | cut -d'"' -f4)
+        # SNAPSHOT JSON structure: {"metadata":{"name":"fbc-mta-8-2-YYYYMMDD-HHMMSS-NNN",...},...}
+        # We want metadata.name, not component names
+
+        # Try to extract metadata.name
+        SNAPSHOT_NAME=$(echo "$SNAPSHOT_JSON" | sed -n 's/.*"metadata"[^}]*"name":"\([^"]*\)".*/\1/p' | head -1)
+        echo "DEBUG: Extracted with metadata pattern: '$SNAPSHOT_NAME'"
+
+        # Fallback: try simpler pattern looking for the timestamp pattern
+        if [ -z "$SNAPSHOT_NAME" ] || [[ ! "$SNAPSHOT_NAME" =~ [0-9]{8}-[0-9]{6} ]]; then
+          echo "DEBUG: Metadata pattern failed or no timestamp, trying grep pattern..."
+          SNAPSHOT_NAME=$(echo "$SNAPSHOT_JSON" | grep -oE '[a-z0-9-]+-[0-9]{8}-[0-9]{6}-[0-9]{3}' | head -1)
+          echo "DEBUG: Extracted with grep pattern: '$SNAPSHOT_NAME'"
+        fi
+
+        # Last resort
         if [ -z "$SNAPSHOT_NAME" ]; then
+          echo "WARNING: Could not extract snapshot name from JSON"
           SNAPSHOT_NAME="unknown"
         fi
+
+        echo "DEBUG: Final snapshot name: '$SNAPSHOT_NAME'"
 
         echo "Sending Slack notification for pipeline: $PIPELINE_RUN"
         echo "Snapshot: $SNAPSHOT_NAME"
