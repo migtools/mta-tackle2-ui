@@ -33,17 +33,30 @@ spec:
         #!/bin/bash
         set -euo pipefail
 
-        echo "Cloning RapiDAST repository..."
+        echo "=== Cloning RapiDAST Repository ==="
 
         # Install git
+        echo "Installing git..."
         dnf install -y git
 
+        echo "Cloning from GitHub..."
         cd /workspace
+
+        # Check if already exists
+        if [ -d "rapidast" ]; then
+          echo "WARNING: rapidast directory already exists, removing it"
+          rm -rf rapidast
+        fi
+
         git clone https://github.com/RedHatProductSecurity/rapidast.git
         cd rapidast
         git checkout development
 
+        echo ""
         echo "OK: RapiDAST cloned successfully"
+        echo "Current directory: $(pwd)"
+        echo "RapiDAST files: $(ls -la | wc -l) files"
+        echo ""
 
     - name: connect-to-cluster
       image: registry.redhat.io/openshift4/ose-cli:latest
@@ -61,38 +74,58 @@ spec:
         KUBECONFIG_PATH="/workspace/kubeconfig"
         OCPCTL_URL="https://ocpctl.mg.dog8code.com"
 
-        echo "Downloading admin kubeconfig for cluster: $CLUSTER_ID"
+        echo "=== Downloading Admin Kubeconfig ==="
+        echo "Cluster ID: $CLUSTER_ID"
+        echo "OCPCTL URL: $OCPCTL_URL"
 
         # Step 1: Get pre-signed download URL from OCPCTL API
+        echo "Step 1: Getting pre-signed S3 URL from OCPCTL..."
         DOWNLOAD_URL_RESPONSE=$(curl -s -H "Authorization: Bearer $OCPCTL_API_KEY" \
           "$OCPCTL_URL/clusters/$CLUSTER_ID/kubeconfig/download-url")
 
+        echo "API Response received (length: ${#DOWNLOAD_URL_RESPONSE} bytes)"
+
         # Extract download URL (no jq available)
+        echo "Step 2: Extracting download URL from response..."
         DOWNLOAD_URL=$(echo "$DOWNLOAD_URL_RESPONSE" | grep -o '"download_url":"[^"]*"' | cut -d'"' -f4 | sed 's/\\u0026/\&/g')
 
         if [ -z "$DOWNLOAD_URL" ]; then
-          echo "ERROR: Failed to get kubeconfig download URL"
-          echo "Response: $DOWNLOAD_URL_RESPONSE"
+          echo "ERROR: Failed to extract kubeconfig download URL"
+          echo "Full Response:"
+          echo "$DOWNLOAD_URL_RESPONSE"
           exit 1
         fi
 
-        echo "Got pre-signed S3 URL (expires in 15 minutes)"
+        echo "OK: Got pre-signed S3 URL (expires in 15 minutes)"
 
-        # Step 2: Download admin kubeconfig from S3
+        # Step 3: Download admin kubeconfig from S3
+        echo "Step 3: Downloading kubeconfig from S3..."
         HTTP_CODE=$(curl -s -o "$KUBECONFIG_PATH" -w "%{http_code}" "$DOWNLOAD_URL")
+
+        echo "HTTP Response Code: $HTTP_CODE"
 
         if [ "$HTTP_CODE" != "200" ]; then
           echo "ERROR: Failed to download kubeconfig from S3 (HTTP $HTTP_CODE)"
+          echo "File contents:"
           cat "$KUBECONFIG_PATH"
           exit 1
         fi
 
+        echo "OK: Kubeconfig downloaded successfully"
+        echo "Kubeconfig size: $(wc -c < $KUBECONFIG_PATH) bytes"
+
         export KUBECONFIG="$KUBECONFIG_PATH"
 
         # Verify connection
+        echo "Step 4: Verifying cluster connection..."
+        echo "Checking who am I..."
         oc whoami
 
-        echo "OK: Connected to cluster with admin credentials"
+        echo ""
+        echo "=== Successfully Connected to Cluster ==="
+        echo "User: $(oc whoami)"
+        echo "Cluster: $(oc whoami --show-server || echo 'unknown')"
+        echo ""
 
     - name: disable-auth
       image: registry.redhat.io/openshift4/ose-cli:latest
