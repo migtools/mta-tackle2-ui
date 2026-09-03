@@ -17,7 +17,13 @@ spec:
   params:
     - name: testStatus
       type: string
-      description: Test execution status (Succeeded/Failed)
+      description: UI E2E test execution status (Succeeded/Failed)
+    - name: dastStatus
+      type: string
+      description: DAST scan execution status (Succeeded/Failed)
+    - name: snapshotName
+      type: string
+      description: Konflux snapshot name
     - name: pipelineRunName
       type: string
       description: Name of the pipeline run
@@ -43,28 +49,48 @@ spec:
         #!/bin/bash
         set -euo pipefail
 
-        TEST_STATUS="$(params.testStatus)"
+        UI_TEST_STATUS="$(params.testStatus)"
+        DAST_STATUS="$(params.dastStatus)"
+        SNAPSHOT_NAME="$(params.snapshotName)"
         PIPELINE_RUN="$(params.pipelineRunName)"
 
         echo "Sending Slack notification for pipeline: $PIPELINE_RUN"
-        echo "Test Status: $TEST_STATUS"
+        echo "Snapshot: $SNAPSHOT_NAME"
+        echo "UI Test Status: $UI_TEST_STATUS"
+        echo "DAST Status: $DAST_STATUS"
 
-        # Determine status text
-        if [ "$TEST_STATUS" = "Succeeded" ]; then
-          STATUS_TEXT="PASSED"
+        # Determine UI test status text
+        if [ "$UI_TEST_STATUS" = "Succeeded" ]; then
+          UI_STATUS_TEXT="✅ PASSED"
         else
-          STATUS_TEXT="FAILED"
+          UI_STATUS_TEXT="❌ FAILED"
+        fi
+
+        # Determine DAST status text
+        if [ "$DAST_STATUS" = "Succeeded" ]; then
+          DAST_STATUS_TEXT="✅ PASSED"
+        else
+          DAST_STATUS_TEXT="❌ FAILED"
+        fi
+
+        # Overall status (both must pass)
+        if [ "$UI_TEST_STATUS" = "Succeeded" ] && [ "$DAST_STATUS" = "Succeeded" ]; then
+          OVERALL_STATUS="✅ ALL PASSED"
+        else
+          OVERALL_STATUS="❌ FAILED"
         fi
 
         # Construct Konflux UI link
         PIPELINE_LINK="https://konflux-ui.apps.kflux-ocp-p01.7ayg.p1.openshiftapps.com/ns/art-mta-tenant/applications/fbc-mta-8-2/pipelineruns/$PIPELINE_RUN"
 
         # Construct message for Slack Workflow
-        # Sends status and pipeline link to Slack workflow trigger
-        # Workflow template: Test: {{status}}, Link: {{pipeline}}
+        # Sends detailed test results to Slack
         MESSAGE=$(cat <<EOF
         {
-          "status": "$STATUS_TEXT",
+          "status": "$OVERALL_STATUS",
+          "snapshot": "$SNAPSHOT_NAME",
+          "ui_tests": "$UI_STATUS_TEXT",
+          "dast_scan": "$DAST_STATUS_TEXT",
           "pipeline": "$PIPELINE_LINK"
         }
         EOF

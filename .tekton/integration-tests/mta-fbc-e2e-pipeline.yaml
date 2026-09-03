@@ -180,9 +180,16 @@ spec:
         - input: "$(tasks.run-e2e-tests.status)"
           operator: in
           values: ["Succeeded", "Failed"]
+        - input: "$(tasks.run-dast-scan.status)"
+          operator: in
+          values: ["Succeeded", "Failed"]
       params:
         - name: testStatus
           value: "$(tasks.run-e2e-tests.status)"
+        - name: dastStatus
+          value: "$(tasks.run-dast-scan.status)"
+        - name: snapshotName
+          value: "$(tasks.parse-metadata.results.snapshot-name)"
         - name: pipelineRunName
           value: "$(context.pipelineRun.name)"
       taskRef:
