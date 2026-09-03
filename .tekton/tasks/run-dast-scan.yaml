@@ -58,22 +58,41 @@ spec:
         set -euo pipefail
 
         CLUSTER_ID="$(params.clusterId)"
-        echo "Connecting to cluster: $CLUSTER_ID"
-
-        # Download kubeconfig from OCPCTL
+        KUBECONFIG_PATH="/workspace/kubeconfig"
         OCPCTL_URL="https://ocpctl.mg.dog8code.com"
 
-        KUBECONFIG_DATA=$(curl -s -X GET \
-          "${OCPCTL_URL}/api/v1/clusters/${CLUSTER_ID}/kubeconfig" \
-          -H "X-API-Key: ${OCPCTL_API_KEY}")
+        echo "Downloading admin kubeconfig for cluster: $CLUSTER_ID"
 
-        echo "$KUBECONFIG_DATA" > /workspace/kubeconfig
-        export KUBECONFIG=/workspace/kubeconfig
+        # Step 1: Get pre-signed download URL from OCPCTL API
+        DOWNLOAD_URL_RESPONSE=$(curl -s -H "Authorization: Bearer $OCPCTL_API_KEY" \
+          "$OCPCTL_URL/clusters/$CLUSTER_ID/kubeconfig/download-url")
+
+        # Extract download URL (no jq available)
+        DOWNLOAD_URL=$(echo "$DOWNLOAD_URL_RESPONSE" | grep -o '"download_url":"[^"]*"' | cut -d'"' -f4 | sed 's/\\u0026/\&/g')
+
+        if [ -z "$DOWNLOAD_URL" ]; then
+          echo "ERROR: Failed to get kubeconfig download URL"
+          echo "Response: $DOWNLOAD_URL_RESPONSE"
+          exit 1
+        fi
+
+        echo "Got pre-signed S3 URL (expires in 15 minutes)"
+
+        # Step 2: Download admin kubeconfig from S3
+        HTTP_CODE=$(curl -s -o "$KUBECONFIG_PATH" -w "%{http_code}" "$DOWNLOAD_URL")
+
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "ERROR: Failed to download kubeconfig from S3 (HTTP $HTTP_CODE)"
+          cat "$KUBECONFIG_PATH"
+          exit 1
+        fi
+
+        export KUBECONFIG="$KUBECONFIG_PATH"
 
         # Verify connection
         oc whoami
 
-        echo "OK: Connected to cluster successfully"
+        echo "OK: Connected to cluster with admin credentials"
 
     - name: disable-auth
       image: registry.redhat.io/openshift4/ose-cli:latest
@@ -85,13 +104,13 @@ spec:
 
         echo "=== MTA Deployment Status Check ==="
 
-        # Debug: Show namespace resources
-        echo "Namespaces:"
-        oc get namespaces | grep mta || echo "No MTA namespaces found"
+        # Debug: Show deployments in openshift-mta
+        echo "Deployments in openshift-mta:"
+        oc get deployments -n openshift-mta 2>&1 || echo "Namespace may not exist or no deployments"
 
         echo ""
-        echo "Resources in openshift-mta namespace:"
-        oc get all -n openshift-mta 2>&1 || echo "Namespace may not exist or no resources"
+        echo "Pods in openshift-mta:"
+        oc get pods -n openshift-mta 2>&1 || echo "No pods found"
 
         echo ""
         echo "Checking for Tackle resources..."
@@ -104,12 +123,17 @@ spec:
         if ! oc get tackle mta -n openshift-mta &>/dev/null; then
           echo "ERROR: MTA Tackle CR 'mta' not found in openshift-mta namespace"
           echo ""
-          echo "Available Tackle resources:"
-          oc get tackle -n openshift-mta 2>&1 || echo "None found"
+          echo "Trying to list available Tackle resources:"
+          oc get tackle -n openshift-mta 2>&1 || echo "Cannot list Tackle resources"
+
+          echo ""
+          echo "Checking if namespace exists:"
+          oc get namespace openshift-mta 2>&1 || echo "Namespace openshift-mta not found"
+
           exit 1
         fi
 
-        echo "Found Tackle CR 'mta'"
+        echo "OK: Found Tackle CR 'mta'"
 
         # Check if auth is enabled (parse JSON without jq)
         FEATURE_AUTH_ENABLED=$(oc get tackle mta -n openshift-mta -o jsonpath='{.spec.feature_auth_required}')
