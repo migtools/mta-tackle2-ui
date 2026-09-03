@@ -72,7 +72,7 @@ spec:
 
         CLUSTER_ID="$(params.clusterId)"
         KUBECONFIG_PATH="/workspace/kubeconfig"
-        OCPCTL_URL="https://ocpctl.mg.dog8code.com"
+        OCPCTL_URL="https://ocpctl.mg.dog8code.com/api/v1"
 
         echo "=== Downloading Admin Kubeconfig ==="
         echo "Cluster ID: $CLUSTER_ID"
@@ -80,10 +80,13 @@ spec:
 
         # Step 1: Get pre-signed download URL from OCPCTL API
         echo "Step 1: Getting pre-signed S3 URL from OCPCTL..."
+        echo "API Endpoint: $OCPCTL_URL/clusters/$CLUSTER_ID/kubeconfig/download-url"
+
         DOWNLOAD_URL_RESPONSE=$(curl -s -H "Authorization: Bearer $OCPCTL_API_KEY" \
           "$OCPCTL_URL/clusters/$CLUSTER_ID/kubeconfig/download-url")
 
         echo "API Response received (length: ${#DOWNLOAD_URL_RESPONSE} bytes)"
+        echo "Response content: '$DOWNLOAD_URL_RESPONSE'"
 
         # Extract download URL (no jq available)
         echo "Step 2: Extracting download URL from response..."
