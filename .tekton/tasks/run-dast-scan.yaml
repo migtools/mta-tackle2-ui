@@ -191,7 +191,7 @@ spec:
           echo "Current UI pod: $UI_POD_NAME"
 
           # Disable auth
-          oc patch tackle tackle -n openshift-mta --type=merge \
+          oc patch tackle mta -n openshift-mta --type=merge \
             -p '{"spec":{"feature_auth_required": "false"}}'
 
           echo "Waiting for UI pod to restart..."
@@ -311,7 +311,7 @@ spec:
             -o jsonpath='{.items[0].metadata.name}')
 
           # Re-enable auth
-          oc patch tackle tackle -n openshift-mta --type=merge \
+          oc patch tackle mta -n openshift-mta --type=merge \
             -p '{"spec":{"feature_auth_required": "true"}}'
 
           echo "Waiting for UI pod to restart..."
