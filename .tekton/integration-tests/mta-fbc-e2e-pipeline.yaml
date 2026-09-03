@@ -30,9 +30,10 @@ spec:
     - name: DEPLOYMENT_STATUS
       description: Operator deployment status
       value: $(tasks.deploy-operator.results.deploymentStatus)
-    - name: TEST_OUTPUT
-      description: Test execution result
-      value: $(tasks.run-e2e-tests.results.testStatus)
+    # TEMPORARILY COMMENTED - UI tests are disabled
+    # - name: TEST_OUTPUT
+    #   description: Test execution result
+    #   value: $(tasks.run-e2e-tests.results.testStatus)
     - name: DAST_SCAN
       description: DAST security scan result
       value: $(tasks.run-dast-scan.results.scanStatus)
