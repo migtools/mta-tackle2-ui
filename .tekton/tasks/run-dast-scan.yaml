@@ -33,22 +33,15 @@ spec:
         #!/bin/bash
         set -euo pipefail
 
-        echo "=== Cloning RapiDAST Repository ==="
+        echo "Cloning RapiDAST repository..."
+        dnf install -y git > /dev/null 2>&1
 
-        # Install git
-        echo "Installing git..."
-        dnf install -y git
-
-        echo "Cloning from GitHub..."
         cd /workspace
-
-        # Check if already exists
         if [ -d "rapidast" ]; then
-          echo "WARNING: rapidast directory already exists, removing it"
           rm -rf rapidast
         fi
 
-        git clone https://github.com/RedHatProductSecurity/rapidast.git
+        git clone --quiet https://github.com/RedHatProductSecurity/rapidast.git
         cd rapidast
         git checkout development
 
@@ -56,12 +49,7 @@ spec:
         chmod -R 777 /workspace/rapidast
         chmod -R 777 /workspace
 
-        echo ""
-        echo "OK: RapiDAST cloned successfully"
-        echo "Current directory: $(pwd)"
-        echo "RapiDAST files: $(ls -la | wc -l) files"
-        echo "Permissions fixed for non-root user"
-        echo ""
+        echo "RapiDAST cloned successfully"
 
     - name: connect-to-cluster
       image: registry.redhat.io/openshift4/ose-cli:latest
@@ -79,61 +67,34 @@ spec:
         KUBECONFIG_PATH="/workspace/kubeconfig"
         OCPCTL_URL="https://ocpctl.mg.dog8code.com/api/v1"
 
-        echo "=== Downloading Admin Kubeconfig ==="
-        echo "Cluster ID: $CLUSTER_ID"
-        echo "OCPCTL URL: $OCPCTL_URL"
+        echo "Downloading admin kubeconfig for cluster: $CLUSTER_ID"
 
-        # Step 1: Get pre-signed download URL from OCPCTL API
-        echo "Step 1: Getting pre-signed S3 URL from OCPCTL..."
-        echo "API Endpoint: $OCPCTL_URL/clusters/$CLUSTER_ID/kubeconfig/download-url"
-
+        # Get pre-signed download URL from OCPCTL API
         DOWNLOAD_URL_RESPONSE=$(curl -s -H "Authorization: Bearer $OCPCTL_API_KEY" \
           "$OCPCTL_URL/clusters/$CLUSTER_ID/kubeconfig/download-url")
 
-        echo "API Response received (length: ${#DOWNLOAD_URL_RESPONSE} bytes)"
-        echo "Response content: '$DOWNLOAD_URL_RESPONSE'"
-
-        # Extract download URL (no jq available)
-        echo "Step 2: Extracting download URL from response..."
+        # Extract download URL
         DOWNLOAD_URL=$(echo "$DOWNLOAD_URL_RESPONSE" | grep -o '"download_url":"[^"]*"' | cut -d'"' -f4 | sed 's/\\u0026/\&/g')
 
         if [ -z "$DOWNLOAD_URL" ]; then
-          echo "ERROR: Failed to extract kubeconfig download URL"
-          echo "Full Response:"
-          echo "$DOWNLOAD_URL_RESPONSE"
+          echo "ERROR: Failed to get kubeconfig download URL"
           exit 1
         fi
 
-        echo "OK: Got pre-signed S3 URL (expires in 15 minutes)"
-
-        # Step 3: Download admin kubeconfig from S3
-        echo "Step 3: Downloading kubeconfig from S3..."
+        # Download admin kubeconfig from S3
         HTTP_CODE=$(curl -s -o "$KUBECONFIG_PATH" -w "%{http_code}" "$DOWNLOAD_URL")
 
-        echo "HTTP Response Code: $HTTP_CODE"
-
         if [ "$HTTP_CODE" != "200" ]; then
-          echo "ERROR: Failed to download kubeconfig from S3 (HTTP $HTTP_CODE)"
-          echo "File contents:"
-          cat "$KUBECONFIG_PATH"
+          echo "ERROR: Failed to download kubeconfig (HTTP $HTTP_CODE)"
           exit 1
         fi
-
-        echo "OK: Kubeconfig downloaded successfully"
-        echo "Kubeconfig size: $(wc -c < $KUBECONFIG_PATH) bytes"
 
         export KUBECONFIG="$KUBECONFIG_PATH"
 
         # Verify connection
-        echo "Step 4: Verifying cluster connection..."
-        echo "Checking who am I..."
-        oc whoami
+        oc whoami > /dev/null
 
-        echo ""
-        echo "=== Successfully Connected to Cluster ==="
-        echo "User: $(oc whoami)"
-        echo "Cluster: $(oc whoami --show-server || echo 'unknown')"
-        echo ""
+        echo "Connected to cluster as $(oc whoami)"
 
     - name: disable-auth
       image: registry.redhat.io/openshift4/ose-cli:latest
@@ -143,63 +104,29 @@ spec:
 
         export KUBECONFIG=/workspace/kubeconfig
 
-        echo "=== MTA Deployment Status Check ==="
+        echo "Checking MTA authentication status..."
 
-        # Debug: Show deployments in openshift-mta
-        echo "Deployments in openshift-mta:"
-        oc get deployments -n openshift-mta 2>&1 || echo "Namespace may not exist or no deployments"
-
-        echo ""
-        echo "Pods in openshift-mta:"
-        oc get pods -n openshift-mta 2>&1 || echo "No pods found"
-
-        echo ""
-        echo "Checking for Tackle resources..."
-        oc get tackle -n openshift-mta 2>&1 || echo "No Tackle resources found or CRD not installed"
-
-        echo ""
-        echo "=== Checking MTA Authentication Status ==="
-
-        # Check if MTA Tackle CR exists (try 'mta' name)
+        # Check if MTA Tackle CR exists
         if ! oc get tackle mta -n openshift-mta &>/dev/null; then
-          echo "ERROR: MTA Tackle CR 'mta' not found in openshift-mta namespace"
-          echo ""
-          echo "Trying to list available Tackle resources:"
-          oc get tackle -n openshift-mta 2>&1 || echo "Cannot list Tackle resources"
-
-          echo ""
-          echo "Checking if namespace exists:"
-          oc get namespace openshift-mta 2>&1 || echo "Namespace openshift-mta not found"
-
+          echo "ERROR: MTA Tackle CR 'mta' not found"
           exit 1
         fi
 
-        echo "OK: Found Tackle CR 'mta'"
-
-        # Check if auth is enabled (parse JSON without jq)
+        # Check if auth is enabled
         FEATURE_AUTH_ENABLED=$(oc get tackle mta -n openshift-mta -o jsonpath='{.spec.feature_auth_required}')
-
-        # Default to false if empty
         if [ -z "$FEATURE_AUTH_ENABLED" ]; then
           FEATURE_AUTH_ENABLED="false"
         fi
 
-        echo "feature_auth_required: $FEATURE_AUTH_ENABLED"
-
         if [ "$FEATURE_AUTH_ENABLED" = "true" ]; then
           echo "Disabling authentication for DAST scan..."
 
-          # Get current UI pod name
           UI_POD_NAME=$(oc get pod -n openshift-mta -l app.kubernetes.io/name=mta-ui \
             -o jsonpath='{.items[0].metadata.name}')
 
-          echo "Current UI pod: $UI_POD_NAME"
-
-          # Disable auth
           oc patch tackle mta -n openshift-mta --type=merge \
             -p '{"spec":{"feature_auth_required": "false"}}'
 
-          echo "Waiting for UI pod to restart..."
           # Wait for old pod to terminate
           timeout 300 bash -c "while oc get pod $UI_POD_NAME -n openshift-mta &>/dev/null; do sleep 5; done" || true
 
@@ -207,10 +134,10 @@ spec:
           oc wait --for=condition=Ready pod -l app.kubernetes.io/name=mta-ui \
             -n openshift-mta --timeout=300s
 
-          echo "OK: Authentication disabled"
+          echo "Authentication disabled"
           echo "true" > /workspace/auth-was-enabled
         else
-          echo "OK: Authentication already disabled"
+          echo "Authentication already disabled"
           echo "false" > /workspace/auth-was-enabled
         fi
 
@@ -223,8 +150,7 @@ spec:
         MTA_ROUTE="$(params.mtaRoute)"
         HUB_URL="${MTA_ROUTE}/hub"
 
-        echo "Creating DAST configuration..."
-        echo "Hub URL: $HUB_URL"
+        echo "Creating DAST configuration for $HUB_URL"
 
         # Create DAST configuration file
         {
@@ -257,7 +183,6 @@ spec:
         } > /workspace/dast-config.yaml
 
         echo "DAST configuration created"
-        cat /workspace/dast-config.yaml
 
     - name: run-dast
       image: registry.redhat.io/ubi9/python-311:latest
@@ -268,35 +193,25 @@ spec:
         echo "Installing RapiDAST dependencies..."
         cd /workspace/rapidast
 
-        # Install pipenv and dependencies
-        pip install --upgrade pip
-        pip install pipenv
-        pipenv run pip install -r requirements.txt
+        pip install --upgrade pip > /dev/null 2>&1
+        pip install pipenv > /dev/null 2>&1
+        pipenv run pip install -r requirements.txt > /dev/null 2>&1
 
-        echo "Starting DAST scan..."
-        echo "WARNING:  This may take 30-60 minutes..."
+        echo "Starting DAST security scan (30-60 minutes)..."
 
         mkdir -p /workspace/dast-results
 
         # Run RapiDAST
         pipenv run python rapidast.py \
           --config /workspace/dast-config.yaml \
-          --log-level debug || {
-            echo "WARNING:  DAST scan encountered issues (exit code: $?)"
-            echo "Continuing to process results..."
+          --log-level info || {
+            echo "WARNING: DAST scan completed with issues"
           }
 
-        echo "OK: DAST scan completed"
+        echo "DAST scan completed"
 
-        # List results
-        echo "Scan results:"
-        ls -lah /workspace/dast-results/ || echo "No results directory found"
-
-        # Check for report
         if [ -f /workspace/dast-results/zap-report.html ]; then
-          echo "OK: ZAP report generated"
-        else
-          echo "WARNING:  No ZAP report found"
+          echo "Security scan report generated"
         fi
 
     - name: re-enable-auth
@@ -307,19 +222,15 @@ spec:
 
         export KUBECONFIG=/workspace/kubeconfig
 
-        # Check if we disabled auth earlier
         if [ -f /workspace/auth-was-enabled ] && [ "$(cat /workspace/auth-was-enabled)" = "true" ]; then
           echo "Re-enabling authentication..."
 
-          # Get current UI pod name
           UI_POD_NAME=$(oc get pod -n openshift-mta -l app.kubernetes.io/name=mta-ui \
             -o jsonpath='{.items[0].metadata.name}')
 
-          # Re-enable auth
           oc patch tackle mta -n openshift-mta --type=merge \
             -p '{"spec":{"feature_auth_required": "true"}}'
 
-          echo "Waiting for UI pod to restart..."
           # Wait for old pod to terminate
           timeout 300 bash -c "while oc get pod $UI_POD_NAME -n openshift-mta &>/dev/null; do sleep 5; done" || true
 
@@ -327,9 +238,7 @@ spec:
           oc wait --for=condition=Ready pod -l app.kubernetes.io/name=mta-ui \
             -n openshift-mta --timeout=300s
 
-          echo "OK: Authentication re-enabled"
-        else
-          echo "OK: Authentication was not modified, no action needed"
+          echo "Authentication re-enabled"
         fi
 
     - name: process-results
@@ -338,23 +247,14 @@ spec:
         #!/bin/bash
         set -euo pipefail
 
-        echo "Processing DAST scan results..."
-
-        # Check if results exist
         if [ ! -d /workspace/dast-results ]; then
-          echo "❌ No results directory found"
+          echo "No results directory found"
           echo "Failed" > $(results.scanStatus.path)
           exit 1
         fi
 
-        # List all result files
-        echo "Result files:"
-        find /workspace/dast-results -type f
-
-        # Check for critical findings (you can customize this logic)
-        # For now, just mark as succeeded if scan completed
         echo "Succeeded" > $(results.scanStatus.path)
-        echo "OK: DAST scan results processed"
+        echo "DAST scan results processed"
 
   workspaces:
     []
