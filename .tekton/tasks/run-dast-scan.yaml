@@ -52,10 +52,15 @@ spec:
         cd rapidast
         git checkout development
 
+        # Fix permissions for non-root Python container
+        chmod -R 777 /workspace/rapidast
+        chmod -R 777 /workspace
+
         echo ""
         echo "OK: RapiDAST cloned successfully"
         echo "Current directory: $(pwd)"
         echo "RapiDAST files: $(ls -la | wc -l) files"
+        echo "Permissions fixed for non-root user"
         echo ""
 
     - name: connect-to-cluster
