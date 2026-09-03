@@ -20,10 +20,11 @@ spec:
       description: UI E2E test execution status (Succeeded/Failed)
     - name: dastStatus
       type: string
-      description: DAST scan execution status (Succeeded/Failed)
-    - name: snapshotName
+      default: "None"
+      description: DAST scan execution status (Succeeded/Failed/None)
+    - name: snapshotJson
       type: string
-      description: Konflux snapshot name
+      description: Konflux snapshot JSON
     - name: pipelineRunName
       type: string
       description: Name of the pipeline run
@@ -51,8 +52,14 @@ spec:
 
         UI_TEST_STATUS="$(params.testStatus)"
         DAST_STATUS="$(params.dastStatus)"
-        SNAPSHOT_NAME="$(params.snapshotName)"
+        SNAPSHOT_JSON='$(params.snapshotJson)'
         PIPELINE_RUN="$(params.pipelineRunName)"
+
+        # Extract snapshot name from JSON (no jq available)
+        SNAPSHOT_NAME=$(echo "$SNAPSHOT_JSON" | grep -o '"name":"[^"]*"' | head -1 | cut -d'"' -f4)
+        if [ -z "$SNAPSHOT_NAME" ]; then
+          SNAPSHOT_NAME="unknown"
+        fi
 
         echo "Sending Slack notification for pipeline: $PIPELINE_RUN"
         echo "Snapshot: $SNAPSHOT_NAME"
@@ -61,33 +68,28 @@ spec:
 
         # Determine UI test status text
         if [ "$UI_TEST_STATUS" = "Succeeded" ]; then
-          UI_STATUS_TEXT="✅ PASSED"
+          UI_STATUS_TEXT="PASSED"
+        elif [ "$UI_TEST_STATUS" = "Failed" ]; then
+          UI_STATUS_TEXT="FAILED"
         else
-          UI_STATUS_TEXT="❌ FAILED"
+          UI_STATUS_TEXT="SKIPPED"
         fi
 
         # Determine DAST status text
         if [ "$DAST_STATUS" = "Succeeded" ]; then
-          DAST_STATUS_TEXT="✅ PASSED"
+          DAST_STATUS_TEXT="PASSED"
+        elif [ "$DAST_STATUS" = "Failed" ]; then
+          DAST_STATUS_TEXT="FAILED"
         else
-          DAST_STATUS_TEXT="❌ FAILED"
-        fi
-
-        # Overall status (both must pass)
-        if [ "$UI_TEST_STATUS" = "Succeeded" ] && [ "$DAST_STATUS" = "Succeeded" ]; then
-          OVERALL_STATUS="✅ ALL PASSED"
-        else
-          OVERALL_STATUS="❌ FAILED"
+          DAST_STATUS_TEXT="NOT RUN"
         fi
 
         # Construct Konflux UI link
         PIPELINE_LINK="https://konflux-ui.apps.kflux-ocp-p01.7ayg.p1.openshiftapps.com/ns/art-mta-tenant/applications/fbc-mta-8-2/pipelineruns/$PIPELINE_RUN"
 
         # Construct message for Slack Workflow
-        # Sends detailed test results to Slack
         MESSAGE=$(cat <<EOF
         {
-          "status": "$OVERALL_STATUS",
           "snapshot": "$SNAPSHOT_NAME",
           "ui_tests": "$UI_STATUS_TEXT",
           "dast_scan": "$DAST_STATUS_TEXT",

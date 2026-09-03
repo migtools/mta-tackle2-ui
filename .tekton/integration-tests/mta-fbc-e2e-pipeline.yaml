@@ -140,21 +140,22 @@ spec:
           - name: pathInRepo
             value: .tekton/tasks/run-dast-scan.yaml
 
-    - name: run-e2e-tests
-      runAfter:
-        - run-dast-scan
-      params:
-        - name: uiRoute
-          value: $(tasks.deploy-operator.results.uiRoute)
-      taskRef:
-        resolver: git
-        params:
-          - name: url
-            value: https://github.com/migtools/mta-tackle2-ui
-          - name: revision
-            value: add-dast-scanning
-          - name: pathInRepo
-            value: .tekton/tasks/run-ui-e2e-tests.yaml
+    # TEMPORARILY COMMENTED FOR TESTING SLACK NOTIFICATIONS
+    # - name: run-e2e-tests
+    #   runAfter:
+    #     - run-dast-scan
+    #   params:
+    #     - name: uiRoute
+    #       value: $(tasks.deploy-operator.results.uiRoute)
+    #   taskRef:
+    #     resolver: git
+    #     params:
+    #       - name: url
+    #         value: https://github.com/migtools/mta-tackle2-ui
+    #       - name: revision
+    #         value: add-dast-scanning
+    #       - name: pathInRepo
+    #         value: .tekton/tasks/run-ui-e2e-tests.yaml
 
   finally:
     - name: release-cluster
@@ -177,19 +178,16 @@ spec:
 
     - name: slack-notification
       when:
-        - input: "$(tasks.run-e2e-tests.status)"
-          operator: in
-          values: ["Succeeded", "Failed"]
         - input: "$(tasks.run-dast-scan.status)"
           operator: in
           values: ["Succeeded", "Failed"]
       params:
         - name: testStatus
-          value: "$(tasks.run-e2e-tests.status)"
+          value: "Skipped"
         - name: dastStatus
           value: "$(tasks.run-dast-scan.status)"
-        - name: snapshotName
-          value: "$(tasks.parse-metadata.results.snapshot-name)"
+        - name: snapshotJson
+          value: "$(params.SNAPSHOT)"
         - name: pipelineRunName
           value: "$(context.pipelineRun.name)"
       taskRef:
