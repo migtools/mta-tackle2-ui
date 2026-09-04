@@ -97,7 +97,7 @@ spec:
         echo "Connected to cluster as $(oc whoami)"
 
     - name: extract-nvr
-      image: registry.redhat.io/openshift4/ose-cli:latest
+      image: registry.redhat.io/ubi9/ubi:latest
       script: |
         #!/bin/bash
         set -euo pipefail
@@ -108,10 +108,18 @@ spec:
         echo "Extracting Operator NVR"
         echo "========================================="
 
-        # Install jq for JSON parsing
+        # Install oc and jq
+        if ! command -v oc &> /dev/null; then
+          echo "Installing oc CLI..."
+          curl -sLO https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz
+          tar -xzf openshift-client-linux.tar.gz -C /usr/local/bin oc
+          chmod +x /usr/local/bin/oc
+          rm -f openshift-client-linux.tar.gz
+        fi
+
         if ! command -v jq &> /dev/null; then
           echo "Installing jq..."
-          microdnf install -y jq || {
+          dnf install -y jq > /dev/null 2>&1 || {
             echo "Warning: jq installation failed, NVR extraction will be skipped"
             exit 0
           }
