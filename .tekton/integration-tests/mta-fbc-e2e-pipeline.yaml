@@ -136,7 +136,7 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: add-nvr-to-slack
           - name: pathInRepo
             value: .tekton/tasks/run-dast-scan.yaml
 
