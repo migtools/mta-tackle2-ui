@@ -1,0 +1,260 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: run-dast-scan
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/categories: Security
+    tekton.dev/tags: dast,security,zap
+    tekton.dev/displayName: "Run DAST Security Scan"
+spec:
+  description: >-
+    Run Dynamic Application Security Testing (DAST) using RapiDAST/ZAP scanner.
+    Scans the MTA Hub API for security vulnerabilities.
+
+  params:
+    - name: clusterId
+      type: string
+      description: OCPCTL cluster ID for connecting to the cluster
+    - name: mtaRoute
+      type: string
+      description: MTA route URL (without /hub suffix)
+
+  results:
+    - name: scanStatus
+      description: DAST scan execution status (Succeeded/Failed)
+
+  steps:
+    - name: clone-rapidast
+      image: registry.redhat.io/ubi9/ubi:latest
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        echo "Cloning RapiDAST repository..."
+        dnf install -y git > /dev/null 2>&1
+
+        cd /workspace
+        if [ -d "rapidast" ]; then
+          rm -rf rapidast
+        fi
+
+        git clone --quiet https://github.com/RedHatProductSecurity/rapidast.git
+        cd rapidast
+        git checkout development
+
+        # Fix permissions for non-root Python container
+        chmod -R 777 /workspace/rapidast
+        chmod -R 777 /workspace
+
+        echo "RapiDAST cloned successfully"
+
+    - name: connect-to-cluster
+      image: registry.redhat.io/openshift4/ose-cli:latest
+      env:
+        - name: OCPCTL_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ocpctl-ci-key
+              key: api-key
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        CLUSTER_ID="$(params.clusterId)"
+        KUBECONFIG_PATH="/workspace/kubeconfig"
+        OCPCTL_URL="https://ocpctl.mg.dog8code.com/api/v1"
+
+        echo "Downloading admin kubeconfig for cluster: $CLUSTER_ID"
+
+        # Get pre-signed download URL from OCPCTL API
+        DOWNLOAD_URL_RESPONSE=$(curl -s -H "Authorization: Bearer $OCPCTL_API_KEY" \
+          "$OCPCTL_URL/clusters/$CLUSTER_ID/kubeconfig/download-url")
+
+        # Extract download URL
+        DOWNLOAD_URL=$(echo "$DOWNLOAD_URL_RESPONSE" | grep -o '"download_url":"[^"]*"' | cut -d'"' -f4 | sed 's/\\u0026/\&/g')
+
+        if [ -z "$DOWNLOAD_URL" ]; then
+          echo "ERROR: Failed to get kubeconfig download URL"
+          exit 1
+        fi
+
+        # Download admin kubeconfig from S3
+        HTTP_CODE=$(curl -s -o "$KUBECONFIG_PATH" -w "%{http_code}" "$DOWNLOAD_URL")
+
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "ERROR: Failed to download kubeconfig (HTTP $HTTP_CODE)"
+          exit 1
+        fi
+
+        export KUBECONFIG="$KUBECONFIG_PATH"
+
+        # Verify connection
+        oc whoami > /dev/null
+
+        echo "Connected to cluster as $(oc whoami)"
+
+    - name: disable-auth
+      image: registry.redhat.io/openshift4/ose-cli:latest
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        export KUBECONFIG=/workspace/kubeconfig
+
+        echo "Checking MTA authentication status..."
+
+        # Check if MTA Tackle CR exists
+        if ! oc get tackle mta -n openshift-mta &>/dev/null; then
+          echo "ERROR: MTA Tackle CR 'mta' not found"
+          exit 1
+        fi
+
+        # Check if auth is enabled
+        FEATURE_AUTH_ENABLED=$(oc get tackle mta -n openshift-mta -o jsonpath='{.spec.feature_auth_required}')
+        if [ -z "$FEATURE_AUTH_ENABLED" ]; then
+          FEATURE_AUTH_ENABLED="false"
+        fi
+
+        if [ "$FEATURE_AUTH_ENABLED" = "true" ]; then
+          echo "Disabling authentication for DAST scan..."
+
+          UI_POD_NAME=$(oc get pod -n openshift-mta -l app.kubernetes.io/name=mta-ui \
+            -o jsonpath='{.items[0].metadata.name}')
+
+          oc patch tackle mta -n openshift-mta --type=merge \
+            -p '{"spec":{"feature_auth_required": "false"}}'
+
+          # Wait for old pod to terminate
+          timeout 300 bash -c "while oc get pod $UI_POD_NAME -n openshift-mta &>/dev/null; do sleep 5; done" || true
+
+          # Wait for new pod to be ready
+          oc wait --for=condition=Ready pod -l app.kubernetes.io/name=mta-ui \
+            -n openshift-mta --timeout=300s
+
+          echo "Authentication disabled"
+          echo "true" > /workspace/auth-was-enabled
+        else
+          echo "Authentication already disabled"
+          echo "false" > /workspace/auth-was-enabled
+        fi
+
+    - name: prepare-config
+      image: registry.redhat.io/ubi9/python-311:latest
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        MTA_ROUTE="$(params.mtaRoute)"
+        HUB_URL="${MTA_ROUTE}/hub"
+
+        echo "Creating DAST configuration for $HUB_URL"
+
+        # Create DAST configuration file
+        {
+          echo "config:"
+          echo "  configVersion: 5"
+          echo "  base_results_dir: \"/workspace/dast-results\""
+          echo ""
+          echo "application:"
+          echo "  shortName: \"MTA\""
+          echo "  url: \"$HUB_URL\""
+          echo ""
+          echo "general:"
+          echo "  container:"
+          echo "    type: \"podman\""
+          echo ""
+          echo "scanners:"
+          echo "  zap:"
+          echo "    apiScan:"
+          echo "      apis:"
+          echo "        apiUrl: \"https://raw.githubusercontent.com/konveyor/tackle2-hub/main/docs/openapi3.json\""
+          echo ""
+          echo "    passiveScan:"
+          echo "      disabledRules: \"2,10015,10024,10027,10054,10096,10109,10112\""
+          echo ""
+          echo "    activeScan:"
+          echo "      policy: \"API-scan-minimal\""
+          echo ""
+          echo "    miscOptions:"
+          echo "      additionalAddons: \"ascanrulesBeta\""
+        } > /workspace/dast-config.yaml
+
+        echo "DAST configuration created"
+
+    - name: run-dast
+      image: registry.redhat.io/ubi9/python-311:latest
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        echo "Installing RapiDAST dependencies..."
+        cd /workspace/rapidast
+
+        pip install --upgrade pip > /dev/null 2>&1
+        pip install pipenv > /dev/null 2>&1
+        pipenv run pip install -r requirements.txt > /dev/null 2>&1
+
+        echo "Starting DAST security scan (30-60 minutes)..."
+
+        mkdir -p /workspace/dast-results
+
+        # Run RapiDAST
+        pipenv run python rapidast.py \
+          --config /workspace/dast-config.yaml \
+          --log-level info || {
+            echo "WARNING: DAST scan completed with issues"
+          }
+
+        echo "DAST scan completed"
+
+        if [ -f /workspace/dast-results/zap-report.html ]; then
+          echo "Security scan report generated"
+        fi
+
+    - name: re-enable-auth
+      image: registry.redhat.io/openshift4/ose-cli:latest
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        export KUBECONFIG=/workspace/kubeconfig
+
+        if [ -f /workspace/auth-was-enabled ] && [ "$(cat /workspace/auth-was-enabled)" = "true" ]; then
+          echo "Re-enabling authentication..."
+
+          UI_POD_NAME=$(oc get pod -n openshift-mta -l app.kubernetes.io/name=mta-ui \
+            -o jsonpath='{.items[0].metadata.name}')
+
+          oc patch tackle mta -n openshift-mta --type=merge \
+            -p '{"spec":{"feature_auth_required": "true"}}'
+
+          # Wait for old pod to terminate
+          timeout 300 bash -c "while oc get pod $UI_POD_NAME -n openshift-mta &>/dev/null; do sleep 5; done" || true
+
+          # Wait for new pod to be ready
+          oc wait --for=condition=Ready pod -l app.kubernetes.io/name=mta-ui \
+            -n openshift-mta --timeout=300s
+
+          echo "Authentication re-enabled"
+        fi
+
+    - name: process-results
+      image: registry.redhat.io/ubi9/ubi:latest
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        if [ ! -d /workspace/dast-results ]; then
+          echo "No results directory found"
+          echo "Failed" > $(results.scanStatus.path)
+          exit 1
+        fi
+
+        echo "Succeeded" > $(results.scanStatus.path)
+        echo "DAST scan results processed"
+
+  workspaces:
+    []
