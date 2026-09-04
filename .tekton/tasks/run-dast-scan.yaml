@@ -96,6 +96,113 @@ spec:
 
         echo "Connected to cluster as $(oc whoami)"
 
+    - name: extract-nvr
+      image: registry.redhat.io/ubi9/ubi:latest
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        export KUBECONFIG=/workspace/kubeconfig
+
+        echo "========================================="
+        echo "Extracting Operator NVR"
+        echo "========================================="
+
+        # Install oc and jq
+        if ! command -v oc &> /dev/null; then
+          echo "Installing oc CLI..."
+          curl -sLO https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz
+          tar -xzf openshift-client-linux.tar.gz -C /usr/local/bin oc
+          chmod +x /usr/local/bin/oc
+          rm -f openshift-client-linux.tar.gz
+        fi
+
+        if ! command -v jq &> /dev/null; then
+          echo "Installing jq..."
+          dnf install -y jq > /dev/null 2>&1 || {
+            echo "Warning: jq installation failed, NVR extraction will be skipped"
+            exit 0
+          }
+        fi
+
+        NVR=""
+
+        # Get latest FBC snapshot for fbc-mta-8-2
+        FBC_APP="fbc-mta-8-2"
+        FBC_SNAPSHOT=$(oc get snapshots -n art-mta-tenant \
+          -l appstudio.openshift.io/application=$FBC_APP \
+          --sort-by=.metadata.creationTimestamp \
+          -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || echo "")
+
+        if [ -n "$FBC_SNAPSHOT" ]; then
+          echo "FBC snapshot: $FBC_SNAPSHOT"
+
+          # Get FBC snapshot creation time
+          FBC_TIME=$(oc get snapshot $FBC_SNAPSHOT -n art-mta-tenant \
+            -o jsonpath='{.metadata.creationTimestamp}')
+          echo "FBC creation time: $FBC_TIME"
+
+          # Find corresponding mta-8-2 snapshot (created before FBC)
+          MTA_SNAPSHOT=$(oc get snapshots -n art-mta-tenant \
+            -l appstudio.openshift.io/application=mta-8-2 \
+            --sort-by=.metadata.creationTimestamp \
+            -o json | \
+            jq -r --arg fbc_time "$FBC_TIME" \
+              '.items[] | select(.metadata.creationTimestamp < $fbc_time) | .metadata.name' | \
+            tail -1)
+
+          if [ -n "$MTA_SNAPSHOT" ]; then
+            echo "Found mta-8-2 snapshot: $MTA_SNAPSHOT"
+
+            # Get bundle image from mta-8-2 snapshot
+            BUNDLE_IMAGE=$(oc get snapshot $MTA_SNAPSHOT -n art-mta-tenant -o json | \
+              jq -r '.spec.components[] | select(.name == "mta-8-2-mta-operator-bundle") | .containerImage')
+
+            if [ -n "$BUNDLE_IMAGE" ] && [ "$BUNDLE_IMAGE" != "null" ]; then
+              echo "Bundle image: $BUNDLE_IMAGE"
+
+              # Extract operator NVR from bundle image labels
+              LABELS=$(oc image info $BUNDLE_IMAGE -o json 2>/dev/null | \
+                jq -r '.config.config.Labels // {}')
+
+              if [ -n "$LABELS" ] && [ "$LABELS" != "{}" ]; then
+                COMPONENT=$(echo "$LABELS" | jq -r '."com.redhat.component" // ""')
+                VERSION=$(echo "$LABELS" | jq -r '.version // ""')
+                RELEASE=$(echo "$LABELS" | jq -r '.release // ""')
+
+                echo "Component: $COMPONENT"
+                echo "Version: $VERSION"
+                echo "Release: $RELEASE"
+
+                if [ -n "$COMPONENT" ] && [ -n "$VERSION" ] && [ -n "$RELEASE" ]; then
+                  NVR="${COMPONENT}-${VERSION}-${RELEASE}"
+                  echo ""
+                  echo "========================================="
+                  echo "✅ Extracted Operator NVR: $NVR"
+                  echo "========================================="
+                else
+                  echo "Warning: Missing component/version/release labels"
+                fi
+              else
+                echo "Warning: No labels found in bundle image"
+              fi
+            else
+              echo "Warning: Bundle image not found in mta-8-2 snapshot"
+            fi
+          else
+            echo "Warning: No mta-8-2 snapshot found before FBC snapshot"
+          fi
+        else
+          echo "Warning: No FBC snapshot found for $FBC_APP"
+        fi
+
+        if [ -z "$NVR" ]; then
+          echo ""
+          echo "========================================="
+          echo "⚠️ NVR extraction failed"
+          echo "========================================="
+        fi
+
     - name: disable-auth
       image: registry.redhat.io/openshift4/ose-cli:latest
       script: |
