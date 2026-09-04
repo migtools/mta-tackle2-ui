@@ -55,40 +55,23 @@ spec:
         SNAPSHOT_JSON='$(params.snapshotJson)'
         PIPELINE_RUN="$(params.pipelineRunName)"
 
-        # DEBUG: Show what we received
-        echo "=== DEBUG: SNAPSHOT JSON (first 500 chars) ==="
-        echo "$SNAPSHOT_JSON" | head -c 500
-        echo ""
-        echo "=== END DEBUG ==="
-        echo ""
-
-        # Extract snapshot name
-        # SNAPSHOT JSON doesn't have metadata - it's just the spec: {"application":"...","components":[...]}
-        # The actual snapshot name is in pipelineRun labels set by Konflux
-
-        # Try to get snapshot name from pipelineRun labels
+        # Extract snapshot name from pipelineRun label
         SNAPSHOT_NAME=$(oc get pipelinerun "$PIPELINE_RUN" -o jsonpath='{.metadata.labels.appstudio\.openshift\.io/snapshot}' 2>/dev/null || true)
-        echo "DEBUG: Snapshot from pipelineRun label: '$SNAPSHOT_NAME'"
 
-        # Fallback: extract application name from JSON
+        # Fallback: use application name
         if [ -z "$SNAPSHOT_NAME" ]; then
-          echo "DEBUG: No label found, using application name..."
           SNAPSHOT_NAME=$(echo "$SNAPSHOT_JSON" | grep -o '"application":"[^"]*"' | cut -d'"' -f4)
-          echo "DEBUG: Application name: '$SNAPSHOT_NAME'"
         fi
 
         # Last resort
         if [ -z "$SNAPSHOT_NAME" ]; then
-          echo "WARNING: Could not determine snapshot name"
           SNAPSHOT_NAME="unknown"
         fi
 
-        echo "DEBUG: Final snapshot name: '$SNAPSHOT_NAME'"
-
-        echo "Sending Slack notification for pipeline: $PIPELINE_RUN"
+        echo "Sending Slack notification"
         echo "Snapshot: $SNAPSHOT_NAME"
-        echo "UI Test Status: $UI_TEST_STATUS"
-        echo "DAST Status: $DAST_STATUS"
+        echo "UI Tests: $UI_TEST_STATUS"
+        echo "DAST Scan: $DAST_STATUS"
 
         # Determine UI test status text
         if [ "$UI_TEST_STATUS" = "Succeeded" ]; then
