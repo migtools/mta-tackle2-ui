@@ -97,34 +97,30 @@ spec:
                 '.spec.components[] | select(.name == $comp) | .containerImage')
 
             if [ -n "$BUNDLE_IMAGE" ] && [ "$BUNDLE_IMAGE" != "null" ]; then
-              echo "Bundle image: $BUNDLE_IMAGE"
+              echo "Bundle component found: $BUNDLE_IMAGE"
 
-              # Extract operator NVR from bundle image labels
-              echo "Inspecting bundle image labels..."
-              LABELS=$(oc image info $BUNDLE_IMAGE -o json 2>/dev/null | \
-                jq -r '.config.config.Labels // {}')
+              # Extract NVR from snapshot annotation (image tag contains full NVR)
+              echo "Extracting NVR from snapshot annotation..."
+              IMAGE_TAG=$(oc get snapshot $MTA_SNAPSHOT -n art-mta-tenant -o json | \
+                jq -r '.metadata.annotations."test.appstudio.openshift.io/result-image-url" // ""')
 
-              if [ -n "$LABELS" ] && [ "$LABELS" != "{}" ]; then
-                COMPONENT=$(echo "$LABELS" | jq -r '."com.redhat.component" // ""')
-                VERSION=$(echo "$LABELS" | jq -r '.version // ""')
-                RELEASE=$(echo "$LABELS" | jq -r '.release // ""')
+              if [ -n "$IMAGE_TAG" ] && [ "$IMAGE_TAG" != "null" ]; then
+                echo "Tagged image: $IMAGE_TAG"
 
-                echo "Component: $COMPONENT"
-                echo "Version: $VERSION"
-                echo "Release: $RELEASE"
+                # Extract tag (everything after the last colon)
+                NVR=$(echo "$IMAGE_TAG" | sed 's/.*://')
 
-                if [ -n "$COMPONENT" ] && [ -n "$VERSION" ] && [ -n "$RELEASE" ]; then
-                  NVR="${COMPONENT}-${VERSION}-${RELEASE}"
+                if [ -n "$NVR" ]; then
                   echo ""
                   echo "========================================="
                   echo "✅ Extracted Operator NVR:"
                   echo "   $NVR"
                   echo "========================================="
                 else
-                  echo "Warning: Missing component/version/release labels"
+                  echo "Warning: Could not extract NVR from image tag"
                 fi
               else
-                echo "Warning: No labels found in bundle image"
+                echo "Warning: No tagged image found in snapshot annotation"
               fi
             else
               echo "Warning: Bundle image not found in MTA snapshot"
