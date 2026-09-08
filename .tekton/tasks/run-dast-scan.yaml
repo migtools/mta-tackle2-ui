@@ -256,4 +256,5 @@ spec:
         echo "Succeeded" > $(results.scanStatus.path)
         echo "DAST scan results processed"
 
-  workspaces: []
+  workspaces:
+    []

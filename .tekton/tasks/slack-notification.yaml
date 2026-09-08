@@ -22,6 +22,10 @@ spec:
       type: string
       default: "None"
       description: DAST scan execution status (Succeeded/Failed/None)
+    - name: operatorNVR
+      type: string
+      default: "unknown"
+      description: Operator NVR (Name-Version-Release)
     - name: snapshotJson
       type: string
       description: Konflux snapshot JSON
@@ -52,6 +56,7 @@ spec:
 
         UI_TEST_STATUS="$(params.testStatus)"
         DAST_STATUS="$(params.dastStatus)"
+        OPERATOR_NVR="$(params.operatorNVR)"
         SNAPSHOT_JSON='$(params.snapshotJson)'
         PIPELINE_RUN="$(params.pipelineRunName)"
 
@@ -70,6 +75,7 @@ spec:
 
         echo "Sending Slack notification"
         echo "Snapshot: $SNAPSHOT_NAME"
+        echo "Operator NVR: $OPERATOR_NVR"
         echo "UI Tests: $UI_TEST_STATUS"
         echo "DAST Scan: $DAST_STATUS"
 
@@ -98,6 +104,7 @@ spec:
         MESSAGE=$(cat <<EOF
         {
           "snapshot": "$SNAPSHOT_NAME",
+          "nvr": "$OPERATOR_NVR",
           "ui_tests": "$UI_STATUS_TEXT",
           "dast_scan": "$DAST_STATUS_TEXT",
           "pipeline": "$PIPELINE_LINK"
