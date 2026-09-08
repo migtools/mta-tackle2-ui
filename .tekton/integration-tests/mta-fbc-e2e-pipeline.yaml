@@ -30,9 +30,9 @@ spec:
     - name: DEPLOYMENT_STATUS
       description: Operator deployment status
       value: $(tasks.deploy-operator.results.deploymentStatus)
-    # - name: TEST_OUTPUT
-    #   description: Test execution result
-    #   value: $(tasks.run-e2e-tests.results.testStatus)
+    - name: TEST_OUTPUT
+      description: Test execution result
+      value: $(tasks.run-e2e-tests.results.testStatus)
     - name: DAST_SCAN
       description: DAST security scan result
       value: $(tasks.run-dast-scan.results.scanStatus)
@@ -64,7 +64,7 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: add-nvr-to-slack
+            value: main
           - name: pathInRepo
             value: .tekton/tasks/extract-operator-nvr.yaml
 
@@ -152,26 +152,25 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: add-nvr-to-slack
+            value: main
           - name: pathInRepo
             value: .tekton/tasks/run-dast-scan.yaml
 
-    # Temporarily skip UI tests to test NVR extraction
-    # - name: run-e2e-tests
-    #   runAfter:
-    #     - run-dast-scan
-    #   params:
-    #     - name: uiRoute
-    #       value: $(tasks.deploy-operator.results.uiRoute)
-    #   taskRef:
-    #     resolver: git
-    #     params:
-    #       - name: url
-    #         value: https://github.com/migtools/mta-tackle2-ui
-    #       - name: revision
-    #         value: main
-    #       - name: pathInRepo
-    #         value: .tekton/tasks/run-ui-e2e-tests.yaml
+    - name: run-e2e-tests
+      runAfter:
+        - run-dast-scan
+      params:
+        - name: uiRoute
+          value: $(tasks.deploy-operator.results.uiRoute)
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/migtools/mta-tackle2-ui
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: .tekton/tasks/run-ui-e2e-tests.yaml
 
   finally:
     - name: release-cluster
@@ -194,12 +193,12 @@ spec:
 
     - name: slack-notification
       when:
-        - input: "$(tasks.run-dast-scan.status)"
+        - input: "$(tasks.run-e2e-tests.status)"
           operator: in
           values: ["Succeeded", "Failed"]
       params:
         - name: testStatus
-          value: "Skipped"
+          value: "$(tasks.run-e2e-tests.status)"
         - name: dastStatus
           value: "$(tasks.run-dast-scan.status)"
         - name: operatorNVR
@@ -214,6 +213,6 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: add-nvr-to-slack
+            value: main
           - name: pathInRepo
             value: .tekton/tasks/slack-notification.yaml
