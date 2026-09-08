@@ -1,0 +1,144 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: extract-operator-nvr
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/categories: Utility
+    tekton.dev/tags: metadata,nvr
+    tekton.dev/displayName: "Extract Operator NVR"
+spec:
+  description: >-
+    Extract operator NVR from bundle image labels.
+    Queries Konflux snapshots to find the corresponding operator bundle
+    and extracts the full NVR (component-version-release) from image labels.
+
+  params:
+    - name: snapshotJson
+      type: string
+      description: Konflux snapshot JSON from pipeline
+
+  results:
+    - name: operatorNVR
+      description: Full operator NVR (e.g., mta-operator-container-8.2.0-...)
+
+  steps:
+    - name: extract-nvr
+      image: registry.redhat.io/openshift4/ose-cli:latest
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        SNAPSHOT_JSON='$(params.snapshotJson)'
+
+        echo "========================================="
+        echo "Extracting Operator NVR from Snapshots"
+        echo "========================================="
+
+        # Install jq for JSON parsing
+        if ! command -v jq &> /dev/null; then
+          echo "Installing jq..."
+          curl -sL https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64 -o /usr/local/bin/jq
+          chmod +x /usr/local/bin/jq
+        fi
+
+        NVR=""
+
+        # Extract FBC application and component from snapshot JSON
+        FBC_APP=$(echo "$SNAPSHOT_JSON" | jq -r '.application // ""')
+        COMPONENT_NAME=$(echo "$SNAPSHOT_JSON" | jq -r '.components[0].name // ""')
+
+        if [ -z "$FBC_APP" ]; then
+          echo "Warning: Could not extract application from snapshot JSON"
+          FBC_APP="fbc-mta-8-2"
+        fi
+
+        echo "FBC Application: $FBC_APP"
+        echo "Component: $COMPONENT_NAME"
+
+        # Get latest FBC snapshot for the application
+        FBC_SNAPSHOT=$(oc get snapshots -n art-mta-tenant \
+          -l appstudio.openshift.io/application=$FBC_APP \
+          --sort-by=.metadata.creationTimestamp \
+          -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || echo "")
+
+        if [ -n "$FBC_SNAPSHOT" ]; then
+          echo "FBC snapshot: $FBC_SNAPSHOT"
+
+          # Get FBC snapshot creation time
+          FBC_TIME=$(oc get snapshot $FBC_SNAPSHOT -n art-mta-tenant \
+            -o jsonpath='{.metadata.creationTimestamp}')
+          echo "FBC creation time: $FBC_TIME"
+
+          # Find corresponding mta-8-2 snapshot (created before FBC)
+          # Determine MTA application name from FBC app name
+          MTA_APP="${FBC_APP#fbc-}"  # Remove 'fbc-' prefix
+          echo "MTA Application: $MTA_APP"
+
+          MTA_SNAPSHOT=$(oc get snapshots -n art-mta-tenant \
+            -l appstudio.openshift.io/application=$MTA_APP \
+            --sort-by=.metadata.creationTimestamp \
+            -o json | \
+            jq -r --arg fbc_time "$FBC_TIME" \
+              '.items[] | select(.metadata.creationTimestamp < $fbc_time) | .metadata.name' | \
+            tail -1)
+
+          if [ -n "$MTA_SNAPSHOT" ]; then
+            echo "Found MTA snapshot: $MTA_SNAPSHOT"
+
+            # Get bundle image from MTA snapshot
+            BUNDLE_COMPONENT="${MTA_APP}-mta-operator-bundle"
+            echo "Looking for bundle component: $BUNDLE_COMPONENT"
+
+            BUNDLE_IMAGE=$(oc get snapshot $MTA_SNAPSHOT -n art-mta-tenant -o json | \
+              jq -r --arg comp "$BUNDLE_COMPONENT" \
+                '.spec.components[] | select(.name == $comp) | .containerImage')
+
+            if [ -n "$BUNDLE_IMAGE" ] && [ "$BUNDLE_IMAGE" != "null" ]; then
+              echo "Bundle component found: $BUNDLE_IMAGE"
+
+              # Extract NVR from snapshot annotation (image tag contains full NVR)
+              echo "Extracting NVR from snapshot annotation..."
+              IMAGE_TAG=$(oc get snapshot $MTA_SNAPSHOT -n art-mta-tenant -o json | \
+                jq -r '.metadata.annotations."test.appstudio.openshift.io/result-image-url" // ""')
+
+              if [ -n "$IMAGE_TAG" ] && [ "$IMAGE_TAG" != "null" ]; then
+                echo "Tagged image: $IMAGE_TAG"
+
+                # Extract tag (everything after the last colon)
+                NVR=$(echo "$IMAGE_TAG" | sed 's/.*://')
+
+                if [ -n "$NVR" ]; then
+                  echo ""
+                  echo "========================================="
+                  echo "✅ Extracted Operator NVR:"
+                  echo "   $NVR"
+                  echo "========================================="
+                else
+                  echo "Warning: Could not extract NVR from image tag"
+                fi
+              else
+                echo "Warning: No tagged image found in snapshot annotation"
+              fi
+            else
+              echo "Warning: Bundle image not found in MTA snapshot"
+            fi
+          else
+            echo "Warning: No MTA snapshot found before FBC snapshot"
+          fi
+        else
+          echo "Warning: No FBC snapshot found for $FBC_APP"
+        fi
+
+        # Write NVR to result (empty string if extraction failed)
+        if [ -z "$NVR" ]; then
+          echo ""
+          echo "========================================="
+          echo "⚠️ NVR extraction failed - using 'unknown'"
+          echo "========================================="
+          NVR="unknown"
+        fi
+
+        echo -n "$NVR" > $(results.operatorNVR.path)
