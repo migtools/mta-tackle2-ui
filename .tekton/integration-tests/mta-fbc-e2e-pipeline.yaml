@@ -52,9 +52,25 @@ spec:
           - name: pathInRepo
             value: tasks/test_metadata.yaml
 
-    - name: verify-image-pullable
+    - name: extract-operator-nvr
       runAfter:
         - parse-metadata
+      params:
+        - name: snapshotJson
+          value: $(params.SNAPSHOT)
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/migtools/mta-tackle2-ui
+          - name: revision
+            value: add-nvr-to-slack
+          - name: pathInRepo
+            value: .tekton/tasks/extract-operator-nvr.yaml
+
+    - name: verify-image-pullable
+      runAfter:
+        - extract-operator-nvr
       params:
         - name: fbcImage
           value: $(tasks.parse-metadata.results.component-container-image)
@@ -186,6 +202,8 @@ spec:
           value: "Skipped"
         - name: dastStatus
           value: "$(tasks.run-dast-scan.status)"
+        - name: operatorNVR
+          value: "$(tasks.extract-operator-nvr.results.operatorNVR)"
         - name: snapshotJson
           value: "$(params.SNAPSHOT)"
         - name: pipelineRunName
@@ -196,6 +214,6 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: add-nvr-to-slack
           - name: pathInRepo
             value: .tekton/tasks/slack-notification.yaml
