@@ -58,13 +58,15 @@ The pipeline is composed of modular Tekton Tasks in `.tekton/tasks/`. Each task 
 | ----------------------- | ------------------------------------------ | ------------------------------------------------ |
 | `verify-image-pullable` | `.tekton/tasks/verify-image-pullable.yaml` | Pre-flight check to verify FBC image is pullable |
 | `deploy-mta-operator`   | `.tekton/tasks/deploy-mta-operator.yaml`   | Deploy MTA operator from FBC image               |
+| `run-dast-scan`         | `.tekton/tasks/run-dast-scan.yaml`         | Run DAST security scan against deployed MTA      |
 | `run-ui-e2e-tests`      | `.tekton/tasks/run-ui-e2e-tests.yaml`      | Run Cypress E2E tests against deployed MTA UI    |
 
-### Notification Tasks
+### Metadata & Notification Tasks
 
-| Task                 | File                                    | Description                                     |
-| -------------------- | --------------------------------------- | ----------------------------------------------- |
-| `slack-notification` | `.tekton/tasks/slack-notification.yaml` | Send test results to Slack with status and link |
+| Task                     | File                                         | Description                                             |
+| ------------------------ | -------------------------------------------- | ------------------------------------------------------- |
+| `extract-operator-nvr`   | `.tekton/tasks/extract-operator-nvr.yaml`    | Extract operator NVR from snapshot annotations          |
+| `slack-notification`     | `.tekton/tasks/slack-notification.yaml`      | Send test results to Slack with NVR, status, and link  |
 
 ### Using tasks in another pipeline
 
@@ -90,17 +92,83 @@ Reference any task via the Tekton git resolver:
 
 All tasks use sensible defaults — only required params need to be provided.
 
+## Operator NVR Extraction
+
+The pipeline extracts the operator NVR (Name-Version-Release) to track which operator version is being tested.
+
+### Why We Need the MTA Snapshot
+
+The FBC snapshot (what the pipeline receives) only contains the **catalog image** tag, which doesn't include the full operator NVR:
+
+```
+FBC snapshot annotation:
+  test.appstudio.openshift.io/result-image-url: 
+    quay.io/.../art-fbc:mta-operator-fbc-8.2.1-20260908113526.ocp4.16
+                         ↑ FBC catalog tag (not the operator NVR)
+```
+
+The **MTA snapshot** contains the operator bundle/metadata image with the full NVR:
+
+```
+MTA snapshot annotation:
+  test.appstudio.openshift.io/result-image-url:
+    quay.io/.../art-images:mta-operator-metadata-container-8.2.1.202609081031.p2.g240a021.assembly.stream.el9-1
+                            ↑ Full operator NVR
+```
+
+### Extraction Process
+
+The `extract-operator-nvr` task:
+
+1. **Receives**: FBC snapshot JSON from pipeline
+2. **Finds**: Latest FBC snapshot for the application (e.g., `fbc-mta-8-2`)
+3. **Gets**: FBC snapshot creation time
+4. **Searches**: For the corresponding MTA snapshot (same version, created **before** FBC)
+   - FBC app: `fbc-mta-8-2` → MTA app: `mta-8-2` (removes `fbc-` prefix)
+   - Filters snapshots created before the FBC snapshot timestamp
+5. **Extracts**: Bundle component `mta-8-2-mta-operator-bundle`
+6. **Parses**: NVR from `test.appstudio.openshift.io/result-image-url` annotation tag
+7. **Returns**: Full NVR (e.g., `mta-operator-metadata-container-8.2.1.202609081031.p2.g240a021.assembly.stream.el9-1`)
+
+### NVR Format
+
+```
+mta-operator-metadata-container-8.2.1.202609081031.p2.g240a021.assembly.stream.el9-1
+└── component ─────────────┘ └─v─┘ └─────── release ────────────────────────────┘
+
+component: mta-operator-metadata-container
+version:   8.2.1
+release:   202609081031.p2.g240a021.assembly.stream.el9-1
+           │           │  │        │                 │
+           │           │  │        │                 └─ OS (el9)
+           │           │  │        └─ Assembly stream type
+           │           │  └─ Git commit SHA (short)
+           │           └─ Patch level
+           └─ Build timestamp (YYYYMMDDHHMM)
+```
+
+This NVR is stamped by ART (Automated Release Tooling) during the container build.
+
 ## Pipeline Steps (Pool-Based)
 
 ### 1. parse-metadata
 
 Extracts the FBC image reference from the Konflux snapshot.
 
-### 2. verify-image-pullable
+### 2. extract-operator-nvr
+
+Extracts the operator NVR from snapshot annotations (runs in Konflux context):
+
+- Queries `art-mta-tenant` namespace for snapshots
+- Finds corresponding MTA snapshot created before FBC snapshot
+- Extracts NVR from `test.appstudio.openshift.io/result-image-url` annotation
+- Passes NVR to Slack notification task
+
+### 3. verify-image-pullable
 
 Pre-flight check to ensure FBC image exists and is pullable before leasing a cluster.
 
-### 3. lease-cluster
+### 4. lease-cluster
 
 Leases a pre-provisioned cluster from OCPCTL pool (`ci-sno-pool-1`):
 
@@ -115,7 +183,7 @@ Leases a pre-provisioned cluster from OCPCTL pool (`ci-sno-pool-1`):
 - If pool has 0 ready clusters → Pipeline fails fast (under 1 minute)
 - No wasted compute resources on unavailable clusters
 
-### 4. cleanup-existing-mta
+### 5. cleanup-existing-mta
 
 Removes any previous MTA installation from the leased cluster:
 
@@ -126,7 +194,7 @@ Removes any previous MTA installation from the leased cluster:
 
 **Why needed:** Pool clusters are reused, so previous test installations must be cleaned up.
 
-### 5. deploy-operator
+### 6. deploy-operator
 
 Installs and configures the MTA operator:
 
@@ -138,7 +206,18 @@ Installs and configures the MTA operator:
 - Waits for MTA UI deployment to be ready
 - Retrieves MTA UI route and Keycloak credentials
 
-### 6. run-e2e-tests
+### 7. run-dast-scan
+
+Runs DAST (Dynamic Application Security Testing) using RapiDAST/ZAP scanner:
+
+- Connects to OCPCTL cluster with admin kubeconfig
+- Disables MTA authentication temporarily for scanning
+- Clones and runs RapiDAST scanner against MTA Hub API
+- Scans for security vulnerabilities (30-60 minutes)
+- Re-enables authentication after scan completes
+- Returns scan status (Succeeded/Failed)
+
+### 8. run-e2e-tests
 
 Runs comprehensive Cypress E2E test suite:
 
@@ -149,7 +228,7 @@ Runs comprehensive Cypress E2E test suite:
 - **Includes `jq` installation** for test data seeding scripts
 - Returns `PASSED` or `FAILED` status
 
-### 7. release-cluster (finally)
+### 9. release-cluster (finally)
 
 Returns the leased cluster to the pool (always runs, even on failure):
 
@@ -157,13 +236,22 @@ Returns the leased cluster to the pool (always runs, even on failure):
 - Cluster becomes available for next test
 - **Non-blocking:** Failure doesn't fail pipeline (auto-release handles it)
 
-### 8. slack-notification (finally)
+### 10. slack-notification (finally)
 
 Sends test completion notification to Slack:
 
 - **Conditional:** Only runs if tests actually executed (not if lease failed)
-- Includes: Test status, Konflux UI link
-- Format: `{status: "PASSED", pipeline: "https://konflux-ui.apps..."}`
+- Includes: Snapshot name, Operator NVR, UI test status, DAST scan status, Konflux UI link
+- Format:
+  ```json
+  {
+    "snapshot": "fbc-mta-8-2-20260908-115910-000",
+    "nvr": "mta-operator-metadata-container-8.2.1.202609081031.p2.g240a021.assembly.stream.el9-1",
+    "ui_tests": "PASSED",
+    "dast_scan": "PASSED",
+    "pipeline": "https://konflux-ui.apps.kflux-ocp-p01.7ayg.p1.openshiftapps.com/..."
+  }
+  ```
 
 ## Configuration
 
