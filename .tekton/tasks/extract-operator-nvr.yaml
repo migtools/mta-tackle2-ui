@@ -11,22 +11,39 @@ metadata:
     tekton.dev/displayName: "Extract Operator NVR"
 spec:
   description: >-
-    Extract operator NVR from bundle image labels.
-    Queries Konflux snapshots to find the corresponding operator bundle
-    and extracts the full NVR (component-version-release) from image labels.
+    Extract operator NVR from bundle ClusterServiceVersion.
+    Queries Konflux snapshots to find the corresponding operator bundle,
+    extracts the CSV from the bundle image, and parses the operator container image.
 
   params:
     - name: snapshotJson
       type: string
       description: Konflux snapshot JSON from pipeline
+    - name: registryPullSecretName
+      type: string
+      default: "registry-pull-secrets"
+      description: Name of the Kubernetes Secret containing stage registry pull credentials
+    - name: channelName
+      type: string
+      default: "stable-v8.2"
+      description: OLM channel name to find bundle for
 
   results:
     - name: operatorNVR
       description: Full operator NVR (e.g., mta-operator-container-8.2.0-...)
 
+  volumes:
+    - name: stage-pull-secret
+      secret:
+        secretName: $(params.registryPullSecretName)
+        optional: true
+
   steps:
     - name: extract-nvr
       image: registry.redhat.io/openshift4/ose-cli:latest
+      volumeMounts:
+        - name: stage-pull-secret
+          mountPath: /stage-pull-secret
       script: |
         #!/bin/bash
         set -euo pipefail
@@ -34,21 +51,27 @@ spec:
         SNAPSHOT_JSON='$(params.snapshotJson)'
 
         echo "========================================="
-        echo "Extracting Operator NVR from Snapshots"
+        echo "Extracting Operator NVR from Bundle CSV"
         echo "========================================="
 
-        # Install jq for JSON parsing
+        # Install jq and yq for JSON/YAML parsing
         if ! command -v jq &> /dev/null; then
           echo "Installing jq..."
           curl -sL https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64 -o /usr/local/bin/jq
           chmod +x /usr/local/bin/jq
         fi
 
-        NVR=""
+        if ! command -v yq &> /dev/null; then
+          echo "Installing yq..."
+          curl -sL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+        fi
 
-        # Extract FBC application and component from snapshot JSON
+        NVR=""
+        CHANNEL_NAME="$(params.channelName)"
+
+        # Extract FBC application from snapshot JSON
         FBC_APP=$(echo "$SNAPSHOT_JSON" | jq -r '.application // ""')
-        COMPONENT_NAME=$(echo "$SNAPSHOT_JSON" | jq -r '.components[0].name // ""')
 
         if [ -z "$FBC_APP" ]; then
           echo "Warning: Could not extract application from snapshot JSON"
@@ -56,7 +79,7 @@ spec:
         fi
 
         echo "FBC Application: $FBC_APP"
-        echo "Component: $COMPONENT_NAME"
+        echo "Channel: $CHANNEL_NAME"
 
         # Get latest FBC snapshot for the application
         FBC_SNAPSHOT=$(oc get snapshots -n art-mta-tenant \
@@ -66,67 +89,137 @@ spec:
 
         if [ -n "$FBC_SNAPSHOT" ]; then
           echo "FBC snapshot: $FBC_SNAPSHOT"
+          echo ""
 
-          # Get FBC snapshot creation time
-          FBC_TIME=$(oc get snapshot $FBC_SNAPSHOT -n art-mta-tenant \
-            -o jsonpath='{.metadata.creationTimestamp}')
-          echo "FBC creation time: $FBC_TIME"
+          # Get FBC image digest
+          FBC_DIGEST=$(oc get snapshot $FBC_SNAPSHOT -n art-mta-tenant -o json | \
+            jq -r '.spec.components[0].containerImage' | grep -o 'sha256:[a-f0-9]*')
 
-          # Find corresponding mta-8-2 snapshot (created before FBC)
-          # Determine MTA application name from FBC app name
-          MTA_APP="${FBC_APP#fbc-}"  # Remove 'fbc-' prefix
-          echo "MTA Application: $MTA_APP"
+          if [ -n "$FBC_DIGEST" ]; then
+            echo "FBC digest: $FBC_DIGEST"
+            FBC_IMAGE="quay.io/redhat-user-workloads/ocp-art-tenant/art-fbc@${FBC_DIGEST}"
+            echo "FBC image: $FBC_IMAGE"
+            echo ""
 
-          MTA_SNAPSHOT=$(oc get snapshots -n art-mta-tenant \
-            -l appstudio.openshift.io/application=$MTA_APP \
-            --sort-by=.metadata.creationTimestamp \
-            -o json | \
-            jq -r --arg fbc_time "$FBC_TIME" \
-              '.items[] | select(.metadata.creationTimestamp < $fbc_time) | .metadata.name' | \
-            tail -1)
+            # Extract FBC catalog
+            echo "Extracting FBC catalog..."
+            CATALOG_DIR="/tmp/fbc-catalog-$$"
+            mkdir -p "$CATALOG_DIR"
 
-          if [ -n "$MTA_SNAPSHOT" ]; then
-            echo "Found MTA snapshot: $MTA_SNAPSHOT"
+            if oc image extract "$FBC_IMAGE" --filter-by-os=linux/amd64 \
+               --path /configs/:"$CATALOG_DIR/" \
+               --confirm 2>&1; then
+              echo "✓ FBC catalog extracted"
+              echo ""
 
-            # Get bundle image from MTA snapshot
-            BUNDLE_COMPONENT="${MTA_APP}-mta-operator-bundle"
-            echo "Looking for bundle component: $BUNDLE_COMPONENT"
+              # Find catalog file
+              CATALOG_FILE=$(find "$CATALOG_DIR" -name "catalog.yaml" -o -name "catalog.json" | head -1)
 
-            BUNDLE_IMAGE=$(oc get snapshot $MTA_SNAPSHOT -n art-mta-tenant -o json | \
-              jq -r --arg comp "$BUNDLE_COMPONENT" \
-                '.spec.components[] | select(.name == $comp) | .containerImage')
+              if [ -f "$CATALOG_FILE" ]; then
+                echo "✓ Found catalog: $(basename $CATALOG_FILE)"
+                echo ""
 
-            if [ -n "$BUNDLE_IMAGE" ] && [ "$BUNDLE_IMAGE" != "null" ]; then
-              echo "Bundle component found: $BUNDLE_IMAGE"
+                # Parse catalog to find latest bundle in channel
+                echo "Parsing catalog for channel: $CHANNEL_NAME"
 
-              # Extract NVR from snapshot annotation (image tag contains full NVR)
-              echo "Extracting NVR from snapshot annotation..."
-              IMAGE_TAG=$(oc get snapshot $MTA_SNAPSHOT -n art-mta-tenant -o json | \
-                jq -r '.metadata.annotations."test.appstudio.openshift.io/result-image-url" // ""')
+                # Get latest bundle name from channel
+                LATEST_BUNDLE=$(yq eval "select(.schema == \"olm.channel\" and .name == \"$CHANNEL_NAME\") | .entries[-1].name" "$CATALOG_FILE")
 
-              if [ -n "$IMAGE_TAG" ] && [ "$IMAGE_TAG" != "null" ]; then
-                echo "Tagged image: $IMAGE_TAG"
-
-                # Extract tag (everything after the last colon)
-                NVR=$(echo "$IMAGE_TAG" | sed 's/.*://')
-
-                if [ -n "$NVR" ]; then
+                if [ -n "$LATEST_BUNDLE" ] && [ "$LATEST_BUNDLE" != "null" ]; then
+                  echo "Latest bundle in channel: $LATEST_BUNDLE"
                   echo ""
-                  echo "========================================="
-                  echo "✅ Extracted Operator NVR:"
-                  echo "   $NVR"
-                  echo "========================================="
+
+                  # Get bundle image reference from catalog
+                  BUNDLE_IMAGE=$(yq eval "select(.schema == \"olm.bundle\" and .name == \"$LATEST_BUNDLE\") | .image" "$CATALOG_FILE")
+
+                  if [ -n "$BUNDLE_IMAGE" ] && [ "$BUNDLE_IMAGE" != "null" ]; then
+                    echo "Bundle image from catalog: $BUNDLE_IMAGE"
+
+                    # Convert registry.redhat.io to registry.stage.redhat.io
+                    BUNDLE_IMAGE="${BUNDLE_IMAGE//registry.redhat.io/registry.stage.redhat.io}"
+                    echo "Using stage registry: $BUNDLE_IMAGE"
+                    echo ""
+
+                    # Check if pull secret is available
+                    REGISTRY_CONFIG_ARG=""
+                    if [ -f /stage-pull-secret/.dockerconfigjson ]; then
+                      REGISTRY_CONFIG_ARG="--registry-config=/stage-pull-secret/.dockerconfigjson"
+                      echo "Using registry pull secret"
+                    else
+                      echo "Warning: No registry pull secret found, trying without credentials"
+                    fi
+
+                    # Extract manifests from bundle
+                    echo "Extracting bundle manifests..."
+                    BUNDLE_DIR="/tmp/bundle-extract-$$"
+                    mkdir -p "$BUNDLE_DIR"
+
+                    if oc image extract "$BUNDLE_IMAGE" $REGISTRY_CONFIG_ARG \
+                       --path /manifests/:"$BUNDLE_DIR/" \
+                       --confirm 2>&1; then
+                      echo "✓ Bundle manifests extracted successfully"
+                      echo ""
+
+                      # Find CSV file
+                      CSV_FILE=$(find "$BUNDLE_DIR" -name "*clusterserviceversion.yaml" | head -1)
+
+                      if [ -f "$CSV_FILE" ]; then
+                        echo "✓ Found CSV: $(basename $CSV_FILE)"
+                        echo ""
+
+                        # Extract operator container image from CSV
+                        echo "Extracting operator image from CSV..."
+                        OPERATOR_IMAGE=$(yq eval '.spec.install.spec.deployments[].spec.template.spec.containers[] | select(.name == "mta-operator") | .image' "$CSV_FILE" 2>/dev/null | head -1)
+
+                        if [ -n "$OPERATOR_IMAGE" ] && [ "$OPERATOR_IMAGE" != "null" ]; then
+                          echo "Operator image from CSV: $OPERATOR_IMAGE"
+                          echo ""
+
+                          # Extract NVR from image tag
+                          if [[ "$OPERATOR_IMAGE" == *":"* ]]; then
+                            IMAGE_TAG=$(echo "$OPERATOR_IMAGE" | sed 's/.*://')
+                            echo "Image tag: $IMAGE_TAG"
+
+                            # Construct operator NVR
+                            NVR="mta-operator-container-${IMAGE_TAG}"
+
+                            echo ""
+                            echo "========================================="
+                            echo "✅ Extracted Operator NVR from CSV:"
+                            echo "   $NVR"
+                            echo "========================================="
+                          else
+                            echo "⚠️ Operator image uses digest instead of tag, cannot extract NVR"
+                          fi
+                        else
+                          echo "⚠️ Could not find mta-operator container in CSV"
+                        fi
+                      else
+                        echo "⚠️ CSV file not found in bundle manifests"
+                      fi
+
+                      # Cleanup
+                      rm -rf "$BUNDLE_DIR"
+                    else
+                      echo "⚠️ Failed to extract bundle manifests"
+                    fi
+                  else
+                    echo "⚠️ Bundle image not found in catalog"
+                  fi
                 else
-                  echo "Warning: Could not extract NVR from image tag"
+                  echo "⚠️ Latest bundle not found in channel $CHANNEL_NAME"
                 fi
               else
-                echo "Warning: No tagged image found in snapshot annotation"
+                echo "⚠️ Catalog file not found"
               fi
+
+              # Cleanup catalog
+              rm -rf "$CATALOG_DIR"
             else
-              echo "Warning: Bundle image not found in MTA snapshot"
+              echo "⚠️ Failed to extract FBC catalog"
             fi
           else
-            echo "Warning: No MTA snapshot found before FBC snapshot"
+            echo "Warning: Could not extract FBC digest"
           fi
         else
           echo "Warning: No FBC snapshot found for $FBC_APP"
