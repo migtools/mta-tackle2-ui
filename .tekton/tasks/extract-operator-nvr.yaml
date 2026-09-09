@@ -175,8 +175,39 @@ spec:
                           echo "Operator image from CSV: $OPERATOR_IMAGE"
                           echo ""
 
-                          # Extract NVR from image tag
-                          if [[ "$OPERATOR_IMAGE" == *":"* ]]; then
+                          # Check if image uses digest or tag
+                          if [[ "$OPERATOR_IMAGE" == *"@sha256:"* ]]; then
+                            echo "Image uses digest - querying registry for tags..."
+
+                            # Convert to stage registry
+                            OPERATOR_IMAGE_STAGE="${OPERATOR_IMAGE//registry.redhat.io/registry.stage.redhat.io}"
+                            echo "Querying: $OPERATOR_IMAGE_STAGE"
+
+                            # Get image info to find tags
+                            if IMAGE_INFO=$(oc image info "$OPERATOR_IMAGE_STAGE" $REGISTRY_CONFIG_ARG -o json 2>/dev/null); then
+                              # Try to get tag from image metadata
+                              # The image may have been pushed with a tag that we can find
+                              IMAGE_TAG=$(echo "$IMAGE_INFO" | jq -r '.config.Labels["version"] // empty' 2>/dev/null)
+
+                              if [ -n "$IMAGE_TAG" ]; then
+                                echo "Found version label: $IMAGE_TAG"
+
+                                # Construct operator NVR
+                                NVR="mta-operator-container-${IMAGE_TAG}"
+
+                                echo ""
+                                echo "========================================="
+                                echo "✅ Extracted Operator NVR from image labels:"
+                                echo "   $NVR"
+                                echo "========================================="
+                              else
+                                echo "⚠️ No version label found in operator image"
+                              fi
+                            else
+                              echo "⚠️ Failed to query operator image"
+                            fi
+                          elif [[ "$OPERATOR_IMAGE" == *":"* ]]; then
+                            # Image uses tag
                             IMAGE_TAG=$(echo "$OPERATOR_IMAGE" | sed 's/.*://')
                             echo "Image tag: $IMAGE_TAG"
 
@@ -185,11 +216,11 @@ spec:
 
                             echo ""
                             echo "========================================="
-                            echo "✅ Extracted Operator NVR from CSV:"
+                            echo "✅ Extracted Operator NVR from image tag:"
                             echo "   $NVR"
                             echo "========================================="
                           else
-                            echo "⚠️ Operator image uses digest instead of tag, cannot extract NVR"
+                            echo "⚠️ Cannot parse operator image format"
                           fi
                         else
                           echo "⚠️ Could not find mta-operator container in CSV"
