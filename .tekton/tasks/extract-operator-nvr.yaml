@@ -184,12 +184,15 @@ spec:
                         ANNOTATIONS_FILE="$BUNDLE_DIR/metadata/annotations.yaml"
                         if [ -f "$ANNOTATIONS_FILE" ]; then
                           echo "Checking bundle metadata annotations..."
+                          echo "Annotations file content:"
+                          cat "$ANNOTATIONS_FILE"
+                          echo ""
 
                           # Try to find operator version in annotations
                           # Common keys: operators.operatorframework.io/operator-version, com.redhat.openshift.versions
-                          OPERATOR_VERSION=$(yq eval '.annotations["operators.operatorframework.io/operator-version"] // .annotations["com.redhat.component.version"] // empty' "$ANNOTATIONS_FILE" 2>/dev/null)
+                          OPERATOR_VERSION=$(yq eval '.annotations["operators.operatorframework.io/operator-version"] // .annotations["com.redhat.component.version"] // empty' "$ANNOTATIONS_FILE" 2>/dev/null || true)
 
-                          if [ -n "$OPERATOR_VERSION" ]; then
+                          if [ -n "$OPERATOR_VERSION" ] && [ "$OPERATOR_VERSION" != "null" ]; then
                             echo "Found operator version in bundle annotations: $OPERATOR_VERSION"
                             NVR="mta-operator-container-${OPERATOR_VERSION}"
 
@@ -198,6 +201,8 @@ spec:
                             echo "✅ Extracted Operator NVR from bundle annotations:"
                             echo "   $NVR"
                             echo "========================================="
+                          else
+                            echo "No operator version found in bundle annotations"
                           fi
                         fi
 
