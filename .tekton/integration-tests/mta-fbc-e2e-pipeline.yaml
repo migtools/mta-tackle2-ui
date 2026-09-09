@@ -64,7 +64,7 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: fix-dynamic-application-name
           - name: pathInRepo
             value: .tekton/tasks/extract-operator-nvr.yaml
 
@@ -80,7 +80,7 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: fix-dynamic-application-name
           - name: pathInRepo
             value: .tekton/tasks/verify-image-pullable.yaml
 
@@ -100,7 +100,7 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: fix-dynamic-application-name
           - name: pathInRepo
             value: .tekton/tasks/ocpctl-pool-lease.yaml
 
@@ -116,7 +116,7 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: fix-dynamic-application-name
           - name: pathInRepo
             value: .tekton/tasks/cleanup-mta.yaml
 
@@ -134,7 +134,7 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: fix-dynamic-application-name
           - name: pathInRepo
             value: .tekton/tasks/deploy-mta-operator.yaml
 
@@ -156,7 +156,7 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: fix-dynamic-application-name
           - name: pathInRepo
             value: .tekton/tasks/run-dast-scan.yaml
 
@@ -176,7 +176,7 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: fix-dynamic-application-name
           - name: pathInRepo
             value: .tekton/tasks/run-ui-e2e-tests.yaml
 
@@ -195,7 +195,7 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: fix-dynamic-application-name
           - name: pathInRepo
             value: .tekton/tasks/ocpctl-pool-release.yaml
 
@@ -221,6 +221,6 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: fix-dynamic-application-name
           - name: pathInRepo
             value: .tekton/tasks/slack-notification.yaml
