@@ -180,8 +180,31 @@ spec:
                         echo "✓ Bundle contents extracted successfully"
                         echo ""
 
-                      # Find CSV file
-                      CSV_FILE=$(find "$BUNDLE_DIR/manifests" -name "*clusterserviceversion.yaml" | head -1)
+                        # Check bundle metadata annotations for operator version
+                        ANNOTATIONS_FILE="$BUNDLE_DIR/metadata/annotations.yaml"
+                        if [ -f "$ANNOTATIONS_FILE" ]; then
+                          echo "Checking bundle metadata annotations..."
+
+                          # Try to find operator version in annotations
+                          # Common keys: operators.operatorframework.io/operator-version, com.redhat.openshift.versions
+                          OPERATOR_VERSION=$(yq eval '.annotations["operators.operatorframework.io/operator-version"] // .annotations["com.redhat.component.version"] // empty' "$ANNOTATIONS_FILE" 2>/dev/null)
+
+                          if [ -n "$OPERATOR_VERSION" ]; then
+                            echo "Found operator version in bundle annotations: $OPERATOR_VERSION"
+                            NVR="mta-operator-container-${OPERATOR_VERSION}"
+
+                            echo ""
+                            echo "========================================="
+                            echo "✅ Extracted Operator NVR from bundle annotations:"
+                            echo "   $NVR"
+                            echo "========================================="
+                          fi
+                        fi
+
+                      # If not found in annotations, try CSV
+                      if [ -z "$NVR" ]; then
+                        # Find CSV file
+                        CSV_FILE=$(find "$BUNDLE_DIR/manifests" -name "*clusterserviceversion.yaml" | head -1)
 
                       if [ -f "$CSV_FILE" ]; then
                         echo "✓ Found CSV: $(basename $CSV_FILE)"
@@ -248,6 +271,7 @@ spec:
                       else
                         echo "⚠️ CSV file not found in bundle manifests"
                       fi
+                      fi  # End of if [ -z "$NVR" ] for CSV check
 
                         # Cleanup
                         rm -rf "$BUNDLE_DIR"
