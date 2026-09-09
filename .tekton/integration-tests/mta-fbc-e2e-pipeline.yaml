@@ -201,9 +201,9 @@ spec:
 
     - name: slack-notification
       when:
-        - input: "$(tasks.deploy-operator.status)"
+        - input: "skip"
           operator: in
-          values: ["Succeeded", "Failed"]
+          values: ["run"]  # Set to "skip" to disable Slack notifications during testing
       params:
         - name: testStatus
           value: "$(tasks.run-e2e-tests.status)"

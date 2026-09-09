@@ -149,19 +149,39 @@ spec:
                       echo "Warning: No registry pull secret found, trying without credentials"
                     fi
 
-                    # Extract manifests from bundle
-                    echo "Extracting bundle manifests..."
-                    BUNDLE_DIR="/tmp/bundle-extract-$$"
-                    mkdir -p "$BUNDLE_DIR"
+                    # First, try to get operator version from bundle image labels
+                    echo "Checking bundle image labels for operator metadata..."
+                    if BUNDLE_INFO=$(oc image info "$BUNDLE_IMAGE" $REGISTRY_CONFIG_ARG -o json 2>/dev/null); then
+                      # Look for operator-related version labels
+                      OPERATOR_VERSION=$(echo "$BUNDLE_INFO" | jq -r '.config.Labels["operators.operatorframework.io/operator-version"] // .config.Labels["com.redhat.component.version"] // empty' 2>/dev/null)
 
-                    if oc image extract "$BUNDLE_IMAGE" $REGISTRY_CONFIG_ARG \
-                       --path /manifests/:"$BUNDLE_DIR/" \
-                       --confirm 2>&1; then
-                      echo "✓ Bundle manifests extracted successfully"
-                      echo ""
+                      if [ -n "$OPERATOR_VERSION" ]; then
+                        echo "Found operator version in bundle labels: $OPERATOR_VERSION"
+                        NVR="mta-operator-container-${OPERATOR_VERSION}"
+
+                        echo ""
+                        echo "========================================="
+                        echo "✅ Extracted Operator NVR from bundle labels:"
+                        echo "   $NVR"
+                        echo "========================================="
+                      fi
+                    fi
+
+                    # If not found in labels, extract bundle contents
+                    if [ -z "$NVR" ]; then
+                      echo "Extracting bundle contents..."
+                      BUNDLE_DIR="/tmp/bundle-extract-$$"
+                      mkdir -p "$BUNDLE_DIR"
+
+                      if oc image extract "$BUNDLE_IMAGE" $REGISTRY_CONFIG_ARG \
+                         --path /manifests/:"$BUNDLE_DIR/manifests/" \
+                         --path /metadata/:"$BUNDLE_DIR/metadata/" \
+                         --confirm 2>&1; then
+                        echo "✓ Bundle contents extracted successfully"
+                        echo ""
 
                       # Find CSV file
-                      CSV_FILE=$(find "$BUNDLE_DIR" -name "*clusterserviceversion.yaml" | head -1)
+                      CSV_FILE=$(find "$BUNDLE_DIR/manifests" -name "*clusterserviceversion.yaml" | head -1)
 
                       if [ -f "$CSV_FILE" ]; then
                         echo "✓ Found CSV: $(basename $CSV_FILE)"
@@ -229,11 +249,12 @@ spec:
                         echo "⚠️ CSV file not found in bundle manifests"
                       fi
 
-                      # Cleanup
-                      rm -rf "$BUNDLE_DIR"
-                    else
-                      echo "⚠️ Failed to extract bundle manifests"
-                    fi
+                        # Cleanup
+                        rm -rf "$BUNDLE_DIR"
+                      else
+                        echo "⚠️ Failed to extract bundle manifests"
+                      fi
+                    fi  # End of if [ -z "$NVR" ]
                   else
                     echo "⚠️ Bundle image not found in catalog"
                   fi
