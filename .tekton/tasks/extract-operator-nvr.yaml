@@ -215,6 +215,14 @@ spec:
                         echo "✓ Found CSV: $(basename $CSV_FILE)"
                         echo ""
 
+                        echo "========================================="
+                        echo "CSV CONTENT (for debugging):"
+                        echo "========================================="
+                        cat "$CSV_FILE"
+                        echo ""
+                        echo "========================================="
+                        echo ""
+
                         # Extract operator container image from CSV
                         echo "Extracting operator image from CSV..."
                         OPERATOR_IMAGE=$(yq eval '.spec.install.spec.deployments[].spec.template.spec.containers[] | select(.name == "mta-operator") | .image' "$CSV_FILE" 2>/dev/null | head -1)
