@@ -171,7 +171,7 @@ spec:
                     if [ -z "$NVR" ]; then
                       echo "Extracting bundle contents..."
                       BUNDLE_DIR="/tmp/bundle-extract-$$"
-                      mkdir -p "$BUNDLE_DIR"
+                      mkdir -p "$BUNDLE_DIR/manifests" "$BUNDLE_DIR/metadata"
 
                       if oc image extract "$BUNDLE_IMAGE" $REGISTRY_CONFIG_ARG \
                          --path /manifests/:"$BUNDLE_DIR/manifests/" \
