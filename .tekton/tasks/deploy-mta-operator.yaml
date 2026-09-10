@@ -201,36 +201,39 @@ spec:
         set -euo pipefail
         trap 'echo "FAILED" > $(results.deploymentStatus.path)' ERR
 
+        # Install jq if not available
+        if ! command -v jq &> /dev/null; then
+          curl -sL https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64 -o /tmp/jq
+          chmod +x /tmp/jq
+          export PATH="/tmp:$PATH"
+        fi
+
         FBC_IMAGE="$(params.fbcImage)"
         PACKAGE_NAME="$(params.packageName)"
         CHANNEL_NAME="$(params.channelName)"
         NAMESPACE="$(params.operatorNamespace)"
         SNAPSHOT_JSON='$(params.snapshotJson)'
 
-        # Auto-detect channel from FBC image tag if not specified
+        # Auto-detect channel from FBC snapshot tag if not specified
         if [ -z "$CHANNEL_NAME" ]; then
-          # Try to extract version from snapshot JSON tag annotation
+          # Extract FBC tag from snapshot JSON annotation
           if [ -n "$SNAPSHOT_JSON" ]; then
             FBC_TAG=$(echo "$SNAPSHOT_JSON" | grep -o '"test.appstudio.openshift.io/result-image-url":"[^"]*"' | cut -d'"' -f4 || echo "")
-            if [ -z "$FBC_TAG" ]; then
-              # Fallback: try getting tag from image info
-              FBC_TAG=$(oc image info "$FBC_IMAGE" -o json 2>/dev/null | jq -r '.config.config.Labels["version"] // empty' || echo "")
-            fi
-          else
-            # No snapshot JSON, try to get from image
-            FBC_TAG=$(oc image info "$FBC_IMAGE" -o json 2>/dev/null | jq -r '.config.config.Labels["version"] // empty' || echo "")
           fi
 
           # Extract version from tag (e.g., mta-operator-fbc-8.2.2-... → 8.2)
-          VERSION=$(echo "$FBC_TAG" | grep -oP 'mta-operator-fbc-\K[0-9]+\.[0-9]+' || echo "")
+          if [ -n "$FBC_TAG" ]; then
+            VERSION=$(echo "$FBC_TAG" | grep -oP 'mta-operator-fbc-\K[0-9]+\.[0-9]+' || echo "")
+          fi
 
           if [ -n "$VERSION" ]; then
             CHANNEL_NAME="stable-v${VERSION}"
             echo "Auto-detected channel: $CHANNEL_NAME (from version $VERSION)"
           else
-            echo "ERROR: Could not auto-detect channel from FBC image/snapshot"
+            echo "ERROR: Could not auto-detect channel from FBC snapshot"
             echo "FBC_IMAGE: $FBC_IMAGE"
-            echo "FBC_TAG: $FBC_TAG"
+            echo "FBC_TAG: ${FBC_TAG:-<not found>}"
+            echo "SNAPSHOT_JSON: ${SNAPSHOT_JSON:0:200}..."
             exit 1
           fi
         fi
