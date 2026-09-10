@@ -217,12 +217,27 @@ spec:
               echo "✓ Found bundle NVR: $BUNDLE_NVR"
               break
             else
-              # No NVR label found, dump labels for debugging
-              echo "⊘ No com.redhat.art.nvr label found on bundle"
-              echo ""
-              echo "All available labels on bundle:"
-              echo "$IMAGE_INFO" | jq -r '.config.config.Labels | to_entries[] | "  \(.key) = \(.value)"' 2>/dev/null || echo "  (could not extract labels)"
-              break
+              # No com.redhat.art.nvr label, try to construct from component+version+release
+              echo "⊘ No com.redhat.art.nvr label found, attempting to construct from labels..."
+
+              COMPONENT=$(echo "$IMAGE_INFO" | jq -r '.config.config.Labels["com.redhat.component"] // empty' 2>/dev/null)
+              VERSION=$(echo "$IMAGE_INFO" | jq -r '.config.config.Labels["version"] // empty' 2>/dev/null)
+              RELEASE=$(echo "$IMAGE_INFO" | jq -r '.config.config.Labels["release"] // empty' 2>/dev/null)
+
+              echo "  component: ${COMPONENT:-<not found>}"
+              echo "  version: ${VERSION:-<not found>}"
+              echo "  release: ${RELEASE:-<not found>}"
+
+              if [ -n "$COMPONENT" ] && [ -n "$VERSION" ] && [ -n "$RELEASE" ]; then
+                BUNDLE_NVR="${COMPONENT}-${VERSION}-${RELEASE}"
+                echo "  ✓ Constructed bundle NVR: $BUNDLE_NVR"
+                break
+              else
+                echo ""
+                echo "All available labels on bundle:"
+                echo "$IMAGE_INFO" | jq -r '.config.config.Labels | to_entries[] | "  \(.key) = \(.value)"' 2>/dev/null || echo "  (could not extract labels)"
+                break
+              fi
             fi
           else
             echo "⊘ Could not access image: $(echo "$IMAGE_INFO" | grep -o 'error:.*' | head -1)"
