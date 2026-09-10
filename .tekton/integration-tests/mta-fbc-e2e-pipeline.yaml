@@ -201,7 +201,7 @@ spec:
 
     - name: slack-notification
       when:
-        - input: "skip"
+        - input: "run"
           operator: in
           values: ["run"]  # Set to "skip" to disable Slack notifications during testing
       params:
