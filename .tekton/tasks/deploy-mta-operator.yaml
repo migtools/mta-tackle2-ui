@@ -21,7 +21,11 @@ spec:
       description: OCPCTL cluster UUID (used to download kubeconfig)
     - name: fbcImage
       type: string
-      description: FBC catalog image reference
+      description: FBC catalog image reference (digest)
+    - name: snapshotJson
+      type: string
+      default: ""
+      description: Konflux snapshot JSON (used to extract FBC tag for version detection)
     - name: packageName
       type: string
       default: "mta-operator"
@@ -201,16 +205,32 @@ spec:
         PACKAGE_NAME="$(params.packageName)"
         CHANNEL_NAME="$(params.channelName)"
         NAMESPACE="$(params.operatorNamespace)"
+        SNAPSHOT_JSON='$(params.snapshotJson)'
 
-        # Auto-detect channel from FBC image if not specified
+        # Auto-detect channel from FBC image tag if not specified
         if [ -z "$CHANNEL_NAME" ]; then
-          # Extract version from FBC image tag (e.g., mta-operator-fbc-8.2.2-... → 8.2)
-          VERSION=$(echo "$FBC_IMAGE" | grep -oP 'mta-operator-fbc-\K[0-9]+\.[0-9]+' || echo "")
+          # Try to extract version from snapshot JSON tag annotation
+          if [ -n "$SNAPSHOT_JSON" ]; then
+            FBC_TAG=$(echo "$SNAPSHOT_JSON" | grep -o '"test.appstudio.openshift.io/result-image-url":"[^"]*"' | cut -d'"' -f4 || echo "")
+            if [ -z "$FBC_TAG" ]; then
+              # Fallback: try getting tag from image info
+              FBC_TAG=$(oc image info "$FBC_IMAGE" -o json 2>/dev/null | jq -r '.config.config.Labels["version"] // empty' || echo "")
+            fi
+          else
+            # No snapshot JSON, try to get from image
+            FBC_TAG=$(oc image info "$FBC_IMAGE" -o json 2>/dev/null | jq -r '.config.config.Labels["version"] // empty' || echo "")
+          fi
+
+          # Extract version from tag (e.g., mta-operator-fbc-8.2.2-... → 8.2)
+          VERSION=$(echo "$FBC_TAG" | grep -oP 'mta-operator-fbc-\K[0-9]+\.[0-9]+' || echo "")
+
           if [ -n "$VERSION" ]; then
             CHANNEL_NAME="stable-v${VERSION}"
-            echo "Auto-detected channel: $CHANNEL_NAME"
+            echo "Auto-detected channel: $CHANNEL_NAME (from version $VERSION)"
           else
-            echo "ERROR: Could not auto-detect channel from FBC image: $FBC_IMAGE"
+            echo "ERROR: Could not auto-detect channel from FBC image/snapshot"
+            echo "FBC_IMAGE: $FBC_IMAGE"
+            echo "FBC_TAG: $FBC_TAG"
             exit 1
           fi
         fi

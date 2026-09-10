@@ -128,6 +128,8 @@ spec:
           value: $(tasks.lease-cluster.results.clusterId)
         - name: fbcImage
           value: $(tasks.parse-metadata.results.component-container-image)
+        - name: snapshotJson
+          value: $(params.SNAPSHOT)
       taskRef:
         resolver: git
         params:
