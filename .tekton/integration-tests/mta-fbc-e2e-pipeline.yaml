@@ -142,7 +142,7 @@ spec:
       runAfter:
         - deploy-operator
       when:
-        - input: "skip"
+        - input: "run"
           operator: in
           values: ["run"]  # Set to "skip" to skip DAST scan
       params:
@@ -164,7 +164,7 @@ spec:
       runAfter:
         - run-dast-scan
       when:
-        - input: "skip"
+        - input: "run"
           operator: in
           values: ["run"]  # Set to "skip" to skip UI tests
       params:
