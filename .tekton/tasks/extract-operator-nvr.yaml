@@ -205,31 +205,51 @@ spec:
         while IFS= read -r CANDIDATE_IMAGE; do
           echo "Checking: $CANDIDATE_IMAGE"
 
-          # Convert to stage registry
-          CANDIDATE_IMAGE_STAGE="${CANDIDATE_IMAGE//registry.redhat.io/registry.stage.redhat.io}"
+          # Try stage registry first, then production registry
+          for REGISTRY_URL in "registry.stage.redhat.io" "registry.redhat.io"; do
+            TEST_IMAGE="${CANDIDATE_IMAGE//registry.redhat.io/$REGISTRY_URL}"
 
-          # Inspect image for com.redhat.art.nvr label
-          NVR=$(oc image info "$CANDIDATE_IMAGE_STAGE" \
-            --filter-by-os linux/amd64 \
-            $REGISTRY_CONFIG_ARG \
-            -o json 2>/dev/null | \
-            jq -r '.config.config.Labels["com.redhat.art.nvr"] // empty' || echo "")
-
-          if [ -n "$NVR" ]; then
-            echo "  Found NVR: $NVR"
-
-            # Check if this is the operator container (not metadata/bundle)
-            if [[ "$NVR" == mta-operator-container-* ]]; then
-              OPERATOR_NVR="$NVR"
-              OPERATOR_IMAGE="$CANDIDATE_IMAGE"
-              echo "  ✓ This is the operator!"
-              break
+            if [ "$REGISTRY_URL" = "registry.stage.redhat.io" ]; then
+              echo "  Trying stage registry..."
             else
-              echo "  ⊘ Not the operator container (might be bundle/metadata)"
+              echo "  Trying production registry..."
             fi
-          else
-            echo "  ⊘ No NVR label found"
-          fi
+
+            # Inspect image for com.redhat.art.nvr label
+            IMAGE_INFO=$(oc image info "$TEST_IMAGE" \
+              --filter-by-os linux/amd64 \
+              $REGISTRY_CONFIG_ARG \
+              -o json 2>&1)
+
+            if [ $? -eq 0 ]; then
+              # Successfully retrieved image info
+              NVR=$(echo "$IMAGE_INFO" | jq -r '.config.config.Labels["com.redhat.art.nvr"] // empty' 2>/dev/null || echo "")
+
+              if [ -n "$NVR" ]; then
+                echo "  Found NVR: $NVR"
+
+                # Check if this is the operator container (not metadata/bundle)
+                if [[ "$NVR" == mta-operator-container-* ]]; then
+                  OPERATOR_NVR="$NVR"
+                  OPERATOR_IMAGE="$CANDIDATE_IMAGE"
+                  echo "  ✓ This is the operator!"
+                  break 2
+                else
+                  echo "  ⊘ Not the operator container (might be bundle/metadata)"
+                  break
+                fi
+              else
+                # No NVR label found, dump all labels for debugging
+                echo "  ⊘ No com.redhat.art.nvr label found"
+                echo "  Available labels:"
+                echo "$IMAGE_INFO" | jq -r '.config.config.Labels | to_entries[] | "    \(.key) = \(.value)"' 2>/dev/null | head -10 || echo "    (could not extract labels)"
+                break
+              fi
+            else
+              echo "  ⊘ Could not access image: $(echo "$IMAGE_INFO" | grep -o 'error:.*' | head -1)"
+            fi
+          done
+
           echo ""
         done <<< "$OPERATOR_CANDIDATES"
 
