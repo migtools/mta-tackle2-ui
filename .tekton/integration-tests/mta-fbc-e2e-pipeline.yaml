@@ -164,7 +164,7 @@ spec:
       runAfter:
         - run-dast-scan
       when:
-        - input: "run"
+        - input: "skip"
           operator: in
           values: ["run"]  # Set to "skip" to skip UI tests
       params:

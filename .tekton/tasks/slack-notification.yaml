@@ -76,7 +76,7 @@ spec:
         # Extract application name from snapshot JSON for dynamic Konflux link
         APPLICATION_NAME=$(echo "$SNAPSHOT_JSON" | grep -o '"application":"[^"]*"' | cut -d'"' -f4)
         if [ -z "$APPLICATION_NAME" ]; then
-          APPLICATION_NAME="fbc-mta-8-2"  # Fallback to default
+          APPLICATION_NAME="unknown"  # Fallback if extraction fails
         fi
 
         echo "Sending Slack notification"

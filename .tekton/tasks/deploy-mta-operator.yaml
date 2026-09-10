@@ -28,8 +28,8 @@ spec:
       description: Operator package name
     - name: channelName
       type: string
-      default: "stable-v8.2"
-      description: OLM subscription channel
+      default: ""
+      description: OLM subscription channel (auto-detected from FBC image if not specified)
     - name: operatorNamespace
       type: string
       default: "openshift-mta"
@@ -201,6 +201,19 @@ spec:
         PACKAGE_NAME="$(params.packageName)"
         CHANNEL_NAME="$(params.channelName)"
         NAMESPACE="$(params.operatorNamespace)"
+
+        # Auto-detect channel from FBC image if not specified
+        if [ -z "$CHANNEL_NAME" ]; then
+          # Extract version from FBC image tag (e.g., mta-operator-fbc-8.2.2-... → 8.2)
+          VERSION=$(echo "$FBC_IMAGE" | grep -oP 'mta-operator-fbc-\K[0-9]+\.[0-9]+' || echo "")
+          if [ -n "$VERSION" ]; then
+            CHANNEL_NAME="stable-v${VERSION}"
+            echo "Auto-detected channel: $CHANNEL_NAME"
+          else
+            echo "ERROR: Could not auto-detect channel from FBC image: $FBC_IMAGE"
+            exit 1
+          fi
+        fi
 
         oc create namespace "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -
 

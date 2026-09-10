@@ -61,8 +61,14 @@ spec:
           chmod +x /usr/local/bin/oras
         fi
 
-        # Get FBC application and snapshot
-        FBC_APP=$(echo "$SNAPSHOT_JSON" | jq -r '.application // "fbc-mta-8-2"')
+        # Get FBC application from snapshot JSON
+        FBC_APP=$(echo "$SNAPSHOT_JSON" | jq -r '.application // empty')
+
+        if [ -z "$FBC_APP" ]; then
+          echo "ERROR: Could not extract application name from snapshot JSON"
+          echo "unknown" > $(results.operatorNVR.path)
+          exit 0
+        fi
 
         FBC_SNAPSHOT=$(oc get snapshots -n art-mta-tenant \
           -l appstudio.openshift.io/application=$FBC_APP \
