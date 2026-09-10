@@ -216,6 +216,9 @@ spec:
 
         # Auto-detect channel from FBC snapshot tag if not specified
         if [ -z "$CHANNEL_NAME" ]; then
+          FBC_TAG=""
+          VERSION=""
+
           # Extract FBC tag from snapshot JSON annotation
           if [ -n "$SNAPSHOT_JSON" ]; then
             FBC_TAG=$(echo "$SNAPSHOT_JSON" | grep -o '"test.appstudio.openshift.io/result-image-url":"[^"]*"' | cut -d'"' -f4 || echo "")
@@ -232,8 +235,8 @@ spec:
           else
             echo "ERROR: Could not auto-detect channel from FBC snapshot"
             echo "FBC_IMAGE: $FBC_IMAGE"
-            echo "FBC_TAG: ${FBC_TAG:-<not found>}"
-            echo "SNAPSHOT_JSON: ${SNAPSHOT_JSON:0:200}..."
+            echo "FBC_TAG: $FBC_TAG"
+            echo "SNAPSHOT_JSON sample: ${SNAPSHOT_JSON:0:200}..."
             exit 1
           fi
         fi
