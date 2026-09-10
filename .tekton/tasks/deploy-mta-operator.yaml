@@ -214,28 +214,25 @@ spec:
         NAMESPACE="$(params.operatorNamespace)"
         SNAPSHOT_JSON='$(params.snapshotJson)'
 
-        # Auto-detect channel from FBC snapshot tag if not specified
+        # Auto-detect channel from application name if not specified
         if [ -z "$CHANNEL_NAME" ]; then
-          FBC_TAG=""
           VERSION=""
 
-          # Extract FBC tag from snapshot JSON annotation
+          # Extract version from application name (e.g., fbc-mta-8-2 → 8.2)
           if [ -n "$SNAPSHOT_JSON" ]; then
-            FBC_TAG=$(echo "$SNAPSHOT_JSON" | grep -o '"test.appstudio.openshift.io/result-image-url":"[^"]*"' | cut -d'"' -f4 || echo "")
-          fi
-
-          # Extract version from tag (e.g., mta-operator-fbc-8.2.2-... → 8.2)
-          if [ -n "$FBC_TAG" ]; then
-            VERSION=$(echo "$FBC_TAG" | grep -oP 'mta-operator-fbc-\K[0-9]+\.[0-9]+' || echo "")
+            APP_NAME=$(echo "$SNAPSHOT_JSON" | grep -o '"application":"[^"]*"' | cut -d'"' -f4 || echo "")
+            if [ -n "$APP_NAME" ]; then
+              # Extract version: fbc-mta-8-2 → 8-2 → 8.2
+              VERSION=$(echo "$APP_NAME" | grep -oE '[0-9]+-[0-9]+' | tr '-' '.')
+            fi
           fi
 
           if [ -n "$VERSION" ]; then
             CHANNEL_NAME="stable-v${VERSION}"
-            echo "Auto-detected channel: $CHANNEL_NAME (from version $VERSION)"
+            echo "Auto-detected channel: $CHANNEL_NAME (from application: $APP_NAME)"
           else
-            echo "ERROR: Could not auto-detect channel from FBC snapshot"
+            echo "ERROR: Could not auto-detect channel from snapshot"
             echo "FBC_IMAGE: $FBC_IMAGE"
-            echo "FBC_TAG: $FBC_TAG"
             echo "SNAPSHOT_JSON sample: ${SNAPSHOT_JSON:0:200}..."
             exit 1
           fi
