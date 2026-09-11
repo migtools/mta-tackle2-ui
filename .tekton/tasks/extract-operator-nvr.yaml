@@ -19,6 +19,10 @@ spec:
     - name: snapshotJson
       type: string
       description: Konflux snapshot JSON from pipeline
+    - name: pipelineRunName
+      type: string
+      default: ""
+      description: Name of the PipelineRun (used to get snapshot name from labels)
     - name: registryPullSecretName
       type: string
       default: "registry-pull-secrets"
@@ -62,9 +66,14 @@ spec:
         fi
 
         # Get snapshot name from current PipelineRun label
-        PIPELINERUN_NAME=$(context.pipelineRun.name)
-        SNAPSHOT_NAME=$(oc get pipelinerun "$PIPELINERUN_NAME" \
-          -o jsonpath='{.metadata.labels.appstudio\.openshift\.io/snapshot}' 2>/dev/null || echo "unknown")
+        PIPELINERUN_NAME="$(params.pipelineRunName)"
+
+        if [ -n "$PIPELINERUN_NAME" ]; then
+          SNAPSHOT_NAME=$(oc get pipelinerun "$PIPELINERUN_NAME" \
+            -o jsonpath='{.metadata.labels.appstudio\.openshift\.io/snapshot}' 2>/dev/null || echo "unknown")
+        else
+          SNAPSHOT_NAME="unknown"
+        fi
 
         # Get FBC image from snapshot JSON
         # Konflux snapshot format: {"application":"...","components":[{"name":"...","containerImage":"..."}]}

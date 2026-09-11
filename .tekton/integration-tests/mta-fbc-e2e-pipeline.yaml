@@ -58,6 +58,8 @@ spec:
       params:
         - name: snapshotJson
           value: $(params.SNAPSHOT)
+        - name: pipelineRunName
+          value: $(context.pipelineRun.name)
       taskRef:
         resolver: git
         params:
