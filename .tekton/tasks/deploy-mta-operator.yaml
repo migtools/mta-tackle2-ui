@@ -21,15 +21,19 @@ spec:
       description: OCPCTL cluster UUID (used to download kubeconfig)
     - name: fbcImage
       type: string
-      description: FBC catalog image reference
+      description: FBC catalog image reference (digest)
+    - name: snapshotJson
+      type: string
+      default: ""
+      description: Konflux snapshot JSON (used to extract FBC tag for version detection)
     - name: packageName
       type: string
       default: "mta-operator"
       description: Operator package name
     - name: channelName
       type: string
-      default: "stable-v8.2"
-      description: OLM subscription channel
+      default: ""
+      description: OLM subscription channel (auto-detected from FBC image if not specified)
     - name: operatorNamespace
       type: string
       default: "openshift-mta"
@@ -197,10 +201,42 @@ spec:
         set -euo pipefail
         trap 'echo "FAILED" > $(results.deploymentStatus.path)' ERR
 
+        # Install jq if not available
+        if ! command -v jq &> /dev/null; then
+          curl -sL https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64 -o /tmp/jq
+          chmod +x /tmp/jq
+          export PATH="/tmp:$PATH"
+        fi
+
         FBC_IMAGE="$(params.fbcImage)"
         PACKAGE_NAME="$(params.packageName)"
         CHANNEL_NAME="$(params.channelName)"
         NAMESPACE="$(params.operatorNamespace)"
+        SNAPSHOT_JSON='$(params.snapshotJson)'
+
+        # Auto-detect channel from application name if not specified
+        if [ -z "$CHANNEL_NAME" ]; then
+          VERSION=""
+
+          # Extract version from application name (e.g., fbc-mta-8-2 → 8.2)
+          if [ -n "$SNAPSHOT_JSON" ]; then
+            APP_NAME=$(echo "$SNAPSHOT_JSON" | grep -o '"application":"[^"]*"' | cut -d'"' -f4 || echo "")
+            if [ -n "$APP_NAME" ]; then
+              # Extract version: fbc-mta-8-2 → 8-2 → 8.2
+              VERSION=$(echo "$APP_NAME" | grep -oE '[0-9]+-[0-9]+' | tr '-' '.')
+            fi
+          fi
+
+          if [ -n "$VERSION" ]; then
+            CHANNEL_NAME="stable-v${VERSION}"
+            echo "Auto-detected channel: $CHANNEL_NAME (from application: $APP_NAME)"
+          else
+            echo "ERROR: Could not auto-detect channel from snapshot"
+            echo "FBC_IMAGE: $FBC_IMAGE"
+            echo "SNAPSHOT_JSON sample: ${SNAPSHOT_JSON:0:200}..."
+            exit 1
+          fi
+        fi
 
         oc create namespace "$NAMESPACE" --dry-run=client -o yaml | oc apply -f -
 

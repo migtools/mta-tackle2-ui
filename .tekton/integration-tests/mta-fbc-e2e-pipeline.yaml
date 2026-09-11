@@ -58,13 +58,15 @@ spec:
       params:
         - name: snapshotJson
           value: $(params.SNAPSHOT)
+        - name: pipelineRunName
+          value: $(context.pipelineRun.name)
       taskRef:
         resolver: git
         params:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: fix-dynamic-application-name
           - name: pathInRepo
             value: .tekton/tasks/extract-operator-nvr.yaml
 
@@ -80,7 +82,7 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: fix-dynamic-application-name
           - name: pathInRepo
             value: .tekton/tasks/verify-image-pullable.yaml
 
@@ -100,7 +102,7 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: fix-dynamic-application-name
           - name: pathInRepo
             value: .tekton/tasks/ocpctl-pool-lease.yaml
 
@@ -116,7 +118,7 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: fix-dynamic-application-name
           - name: pathInRepo
             value: .tekton/tasks/cleanup-mta.yaml
 
@@ -128,19 +130,25 @@ spec:
           value: $(tasks.lease-cluster.results.clusterId)
         - name: fbcImage
           value: $(tasks.parse-metadata.results.component-container-image)
+        - name: snapshotJson
+          value: $(params.SNAPSHOT)
       taskRef:
         resolver: git
         params:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: fix-dynamic-application-name
           - name: pathInRepo
             value: .tekton/tasks/deploy-mta-operator.yaml
 
     - name: run-dast-scan
       runAfter:
         - deploy-operator
+      when:
+        - input: "run"
+          operator: in
+          values: ["run"]  # Set to "skip" to skip DAST scan
       params:
         - name: clusterId
           value: $(tasks.lease-cluster.results.clusterId)
@@ -152,13 +160,17 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: fix-dynamic-application-name
           - name: pathInRepo
             value: .tekton/tasks/run-dast-scan.yaml
 
     - name: run-e2e-tests
       runAfter:
         - run-dast-scan
+      when:
+        - input: "skip"
+          operator: in
+          values: ["run"]  # Set to "skip" to skip UI tests
       params:
         - name: uiRoute
           value: $(tasks.deploy-operator.results.uiRoute)
@@ -168,7 +180,7 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: fix-dynamic-application-name
           - name: pathInRepo
             value: .tekton/tasks/run-ui-e2e-tests.yaml
 
@@ -187,15 +199,15 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: fix-dynamic-application-name
           - name: pathInRepo
             value: .tekton/tasks/ocpctl-pool-release.yaml
 
     - name: slack-notification
       when:
-        - input: "$(tasks.run-e2e-tests.status)"
+        - input: "skip"
           operator: in
-          values: ["Succeeded", "Failed"]
+          values: ["run"]  # Set to "skip" to disable Slack notifications during testing
       params:
         - name: testStatus
           value: "$(tasks.run-e2e-tests.status)"
@@ -213,6 +225,6 @@ spec:
           - name: url
             value: https://github.com/migtools/mta-tackle2-ui
           - name: revision
-            value: main
+            value: fix-dynamic-application-name
           - name: pathInRepo
             value: .tekton/tasks/slack-notification.yaml

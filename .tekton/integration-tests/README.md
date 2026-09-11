@@ -65,7 +65,7 @@ The pipeline is composed of modular Tekton Tasks in `.tekton/tasks/`. Each task 
 
 | Task                     | File                                         | Description                                             |
 | ------------------------ | -------------------------------------------- | ------------------------------------------------------- |
-| `extract-operator-nvr`   | `.tekton/tasks/extract-operator-nvr.yaml`    | Extract operator NVR from snapshot annotations          |
+| `extract-operator-nvr`   | `.tekton/tasks/extract-operator-nvr.yaml`    | Extract operator NVR from Konflux FBC related-images artifact |
 | `slack-notification`     | `.tekton/tasks/slack-notification.yaml`      | Send test results to Slack with NVR, status, and link  |
 
 ### Using tasks in another pipeline
@@ -96,49 +96,40 @@ All tasks use sensible defaults — only required params need to be provided.
 
 The pipeline extracts the operator NVR (Name-Version-Release) to track which operator version is being tested.
 
-### Why We Need the MTA Snapshot
+### Extraction Approach: Konflux Related-Images Artifact
 
-The FBC snapshot (what the pipeline receives) only contains the **catalog image** tag, which doesn't include the full operator NVR:
-
-```
-FBC snapshot annotation:
-  test.appstudio.openshift.io/result-image-url: 
-    quay.io/.../art-fbc:mta-operator-fbc-8.2.1-20260908113526.ocp4.16
-                         ↑ FBC catalog tag (not the operator NVR)
-```
-
-The **MTA snapshot** contains the operator bundle/metadata image with the full NVR:
-
-```
-MTA snapshot annotation:
-  test.appstudio.openshift.io/result-image-url:
-    quay.io/.../art-images:mta-operator-metadata-container-8.2.1.202609081031.p2.g240a021.assembly.stream.el9-1
-                            ↑ Full operator NVR
-```
+Konflux CI automatically attaches a `related-images.json` artifact to every FBC image during build. This artifact contains all container image references from the FBC catalog, including the operator bundle.
 
 ### Extraction Process
 
-The `extract-operator-nvr` task:
+The `extract-operator-nvr` task uses **oras** (OCI Registry As Storage) to discover and pull the related-images artifact:
 
-1. **Receives**: FBC snapshot JSON from pipeline
-2. **Finds**: Latest FBC snapshot for the application (e.g., `fbc-mta-8-2`)
-3. **Gets**: FBC snapshot creation time
-4. **Searches**: For the corresponding MTA snapshot (same version, created **before** FBC)
-   - FBC app: `fbc-mta-8-2` → MTA app: `mta-8-2` (removes `fbc-` prefix)
-   - Filters snapshots created before the FBC snapshot timestamp
-5. **Extracts**: Bundle component `mta-8-2-mta-operator-bundle`
-6. **Parses**: NVR from `test.appstudio.openshift.io/result-image-url` annotation tag
-7. **Returns**: Full NVR (e.g., `mta-operator-metadata-container-8.2.1.202609081031.p2.g240a021.assembly.stream.el9-1`)
+1. **Discovers artifact**: Uses `oras discover` to find the `related-images.json` artifact attached to the FBC image
+2. **Pulls artifact**: Downloads the pre-computed list of all images (~1.7 KB JSON file)
+3. **Finds bundle**: Filters for the operator bundle image (e.g., `mta-operator-bundle@sha256:...`)
+4. **Inspects bundle**: Uses `oc image info` to read labels from the bundle image:
+   - **Production builds**: Read `com.redhat.art.nvr` label directly
+   - **Konflux CI builds**: Construct NVR from `component + version + release` labels
+5. **Transforms NVR**: Convert bundle metadata NVR to operator container NVR:
+   - Bundle: `mta-operator-metadata-container-8.2.2-...-1`
+   - Operator: `mta-operator-container-8.2.2-...` (remove `-metadata` and trailing `-1`)
+
+### Why This Approach Works
+
+- **Konflux-native**: Uses official Konflux artifact mechanism (not time-based matching)
+- **Fast**: Downloads 1.7 KB JSON instead of rendering full FBC catalog
+- **Reliable**: No digest mismatches or snapshot timestamp assumptions
+- **Universal**: Works for both Konflux CI builds and ART production builds
 
 ### NVR Format
 
 ```
-mta-operator-metadata-container-8.2.1.202609081031.p2.g240a021.assembly.stream.el9-1
-└── component ─────────────┘ └─v─┘ └─────── release ────────────────────────────┘
+mta-operator-container-8.2.2-202609101434.p2.g4ac6344.assembly.stream.el9
+└── component ────┘ └─v─┘ └─────── release ────────────────────────────┘
 
-component: mta-operator-metadata-container
-version:   8.2.1
-release:   202609081031.p2.g240a021.assembly.stream.el9-1
+component: mta-operator-container
+version:   8.2.2
+release:   202609101434.p2.g4ac6344.assembly.stream.el9
            │           │  │        │                 │
            │           │  │        │                 └─ OS (el9)
            │           │  │        └─ Assembly stream type
@@ -146,8 +137,6 @@ release:   202609081031.p2.g240a021.assembly.stream.el9-1
            │           └─ Patch level
            └─ Build timestamp (YYYYMMDDHHMM)
 ```
-
-This NVR is stamped by ART (Automated Release Tooling) during the container build.
 
 ## Pipeline Steps (Pool-Based)
 
@@ -157,12 +146,14 @@ Extracts the FBC image reference from the Konflux snapshot.
 
 ### 2. extract-operator-nvr
 
-Extracts the operator NVR from snapshot annotations (runs in Konflux context):
+Extracts the operator NVR from Konflux FBC related-images artifact:
 
-- Queries `art-mta-tenant` namespace for snapshots
-- Finds corresponding MTA snapshot created before FBC snapshot
-- Extracts NVR from `test.appstudio.openshift.io/result-image-url` annotation
-- Passes NVR to Slack notification task
+- Discovers `related-images.json` artifact attached to FBC image
+- Pulls artifact containing all catalog image references
+- Finds operator bundle image from the list
+- Inspects bundle for NVR labels (constructs from `component+version+release` if needed)
+- Transforms bundle metadata NVR to operator container NVR
+- Passes operator NVR to Slack notification task
 
 ### 3. verify-image-pullable
 

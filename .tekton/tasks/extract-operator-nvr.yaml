@@ -11,134 +11,172 @@ metadata:
     tekton.dev/displayName: "Extract Operator NVR"
 spec:
   description: >-
-    Extract operator NVR from bundle image labels.
-    Queries Konflux snapshots to find the corresponding operator bundle
-    and extracts the full NVR (component-version-release) from image labels.
+    Extract operator NVR from FBC snapshot using Konflux-attached related-images artifact.
+    Uses oras to discover and pull the related-images.json artifact, then inspects the
+    bundle image for the com.redhat.art.nvr label (bundle metadata NVR).
 
   params:
     - name: snapshotJson
       type: string
       description: Konflux snapshot JSON from pipeline
+    - name: pipelineRunName
+      type: string
+      default: ""
+      description: Name of the PipelineRun (used to get snapshot name from labels)
+    - name: registryPullSecretName
+      type: string
+      default: "registry-pull-secrets"
+      description: Name of the Kubernetes Secret containing stage registry pull credentials
 
   results:
     - name: operatorNVR
-      description: Full operator NVR (e.g., mta-operator-container-8.2.0-...)
+      description: Full operator NVR (e.g., mta-operator-container-8.2.1-...)
+
+  volumes:
+    - name: stage-pull-secret
+      secret:
+        secretName: $(params.registryPullSecretName)
+        optional: true
 
   steps:
     - name: extract-nvr
       image: registry.redhat.io/openshift4/ose-cli:latest
+      volumeMounts:
+        - name: stage-pull-secret
+          mountPath: /stage-pull-secret
       script: |
         #!/bin/bash
         set -euo pipefail
 
         SNAPSHOT_JSON='$(params.snapshotJson)'
 
-        echo "========================================="
-        echo "Extracting Operator NVR from Snapshots"
-        echo "========================================="
+        echo "Extracting Operator NVR from FBC snapshot..."
 
-        # Install jq for JSON parsing
+        # Install dependencies
         if ! command -v jq &> /dev/null; then
-          echo "Installing jq..."
           curl -sL https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64 -o /usr/local/bin/jq
           chmod +x /usr/local/bin/jq
         fi
 
-        NVR=""
-
-        # Extract FBC application and component from snapshot JSON
-        FBC_APP=$(echo "$SNAPSHOT_JSON" | jq -r '.application // ""')
-        COMPONENT_NAME=$(echo "$SNAPSHOT_JSON" | jq -r '.components[0].name // ""')
-
-        if [ -z "$FBC_APP" ]; then
-          echo "Warning: Could not extract application from snapshot JSON"
-          FBC_APP="fbc-mta-8-2"
+        if ! command -v oras &> /dev/null; then
+          ORAS_VERSION="1.2.0"
+          curl -sL "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz" | \
+            tar -xz -C /usr/local/bin oras
+          chmod +x /usr/local/bin/oras
         fi
 
-        echo "FBC Application: $FBC_APP"
-        echo "Component: $COMPONENT_NAME"
+        # Get snapshot name from current PipelineRun label
+        PIPELINERUN_NAME="$(params.pipelineRunName)"
 
-        # Get latest FBC snapshot for the application
-        FBC_SNAPSHOT=$(oc get snapshots -n art-mta-tenant \
-          -l appstudio.openshift.io/application=$FBC_APP \
-          --sort-by=.metadata.creationTimestamp \
-          -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || echo "")
-
-        if [ -n "$FBC_SNAPSHOT" ]; then
-          echo "FBC snapshot: $FBC_SNAPSHOT"
-
-          # Get FBC snapshot creation time
-          FBC_TIME=$(oc get snapshot $FBC_SNAPSHOT -n art-mta-tenant \
-            -o jsonpath='{.metadata.creationTimestamp}')
-          echo "FBC creation time: $FBC_TIME"
-
-          # Find corresponding mta-8-2 snapshot (created before FBC)
-          # Determine MTA application name from FBC app name
-          MTA_APP="${FBC_APP#fbc-}"  # Remove 'fbc-' prefix
-          echo "MTA Application: $MTA_APP"
-
-          MTA_SNAPSHOT=$(oc get snapshots -n art-mta-tenant \
-            -l appstudio.openshift.io/application=$MTA_APP \
-            --sort-by=.metadata.creationTimestamp \
-            -o json | \
-            jq -r --arg fbc_time "$FBC_TIME" \
-              '.items[] | select(.metadata.creationTimestamp < $fbc_time) | .metadata.name' | \
-            tail -1)
-
-          if [ -n "$MTA_SNAPSHOT" ]; then
-            echo "Found MTA snapshot: $MTA_SNAPSHOT"
-
-            # Get bundle image from MTA snapshot
-            BUNDLE_COMPONENT="${MTA_APP}-mta-operator-bundle"
-            echo "Looking for bundle component: $BUNDLE_COMPONENT"
-
-            BUNDLE_IMAGE=$(oc get snapshot $MTA_SNAPSHOT -n art-mta-tenant -o json | \
-              jq -r --arg comp "$BUNDLE_COMPONENT" \
-                '.spec.components[] | select(.name == $comp) | .containerImage')
-
-            if [ -n "$BUNDLE_IMAGE" ] && [ "$BUNDLE_IMAGE" != "null" ]; then
-              echo "Bundle component found: $BUNDLE_IMAGE"
-
-              # Extract NVR from snapshot annotation (image tag contains full NVR)
-              echo "Extracting NVR from snapshot annotation..."
-              IMAGE_TAG=$(oc get snapshot $MTA_SNAPSHOT -n art-mta-tenant -o json | \
-                jq -r '.metadata.annotations."test.appstudio.openshift.io/result-image-url" // ""')
-
-              if [ -n "$IMAGE_TAG" ] && [ "$IMAGE_TAG" != "null" ]; then
-                echo "Tagged image: $IMAGE_TAG"
-
-                # Extract tag (everything after the last colon)
-                NVR=$(echo "$IMAGE_TAG" | sed 's/.*://')
-
-                if [ -n "$NVR" ]; then
-                  echo ""
-                  echo "========================================="
-                  echo "✅ Extracted Operator NVR:"
-                  echo "   $NVR"
-                  echo "========================================="
-                else
-                  echo "Warning: Could not extract NVR from image tag"
-                fi
-              else
-                echo "Warning: No tagged image found in snapshot annotation"
-              fi
-            else
-              echo "Warning: Bundle image not found in MTA snapshot"
-            fi
-          else
-            echo "Warning: No MTA snapshot found before FBC snapshot"
-          fi
+        if [ -n "$PIPELINERUN_NAME" ]; then
+          SNAPSHOT_NAME=$(oc get pipelinerun "$PIPELINERUN_NAME" \
+            -o jsonpath='{.metadata.labels.appstudio\.openshift\.io/snapshot}' 2>/dev/null || echo "unknown")
         else
-          echo "Warning: No FBC snapshot found for $FBC_APP"
+          SNAPSHOT_NAME="unknown"
         fi
 
-        # Write NVR to result (empty string if extraction failed)
-        if [ -z "$NVR" ]; then
-          echo ""
-          echo "========================================="
-          echo "⚠️ NVR extraction failed - using 'unknown'"
-          echo "========================================="
-          NVR="unknown"
+        # Get FBC image from snapshot JSON
+        # Konflux snapshot format: {"application":"...","components":[{"name":"...","containerImage":"..."}]}
+        FBC_IMAGE=$(echo "$SNAPSHOT_JSON" | jq -r '.components[0].containerImage // empty')
+
+        if [ -z "$FBC_IMAGE" ]; then
+          echo "ERROR: Could not extract FBC image from snapshot JSON"
+          exit 1
         fi
 
-        echo -n "$NVR" > $(results.operatorNVR.path)
+        echo "Snapshot: $SNAPSHOT_NAME"
+        echo "FBC image: $FBC_IMAGE"
+
+        # Discover and pull related-images artifact
+        echo "Discovering related-images artifact..."
+        RELATED_IMAGES_DIGEST=$(oras discover --format json "$FBC_IMAGE" 2>/dev/null | \
+          jq -r '.manifests[]? | select(.annotations.attachedMediaType == "application/vnd.konflux-ci.attached-artifact.related-images+json") | .digest' || echo "")
+
+        if [ -z "$RELATED_IMAGES_DIGEST" ]; then
+          echo "ERROR: No related-images artifact found (not a Konflux CI build?)"
+          echo "unknown" > $(results.operatorNVR.path)
+          exit 0
+        fi
+
+        echo "Related-images artifact: $RELATED_IMAGES_DIGEST"
+
+        WORK_DIR="/tmp/related-images-$$"
+        mkdir -p "$WORK_DIR"
+        cd "$WORK_DIR"
+
+        FBC_REPO=$(echo "$FBC_IMAGE" | sed 's/@sha256:.*//' | sed 's/:.*$//')
+        oras pull "${FBC_REPO}@${RELATED_IMAGES_DIGEST}" 2>&1 | grep -E "Downloaded|Pulled"
+
+        if [ ! -f "related-images.json" ]; then
+          echo "ERROR: Failed to pull related-images.json"
+          cd /
+          rm -rf "$WORK_DIR"
+          echo "unknown" > $(results.operatorNVR.path)
+          exit 0
+        fi
+
+        # Find bundle image
+        BUNDLE_IMAGE=$(cat related-images.json | \
+          jq -r '.[]' | \
+          grep -i "operator.*bundle\|bundle.*operator" | head -1 || echo "")
+
+        if [ -z "$BUNDLE_IMAGE" ]; then
+          echo "ERROR: No bundle image found in related-images"
+          cd /
+          rm -rf "$WORK_DIR"
+          echo "unknown" > $(results.operatorNVR.path)
+          exit 0
+        fi
+
+        # Inspect bundle for NVR
+        REGISTRY_CONFIG_ARG=""
+        if [ -f /stage-pull-secret/.dockerconfigjson ]; then
+          REGISTRY_CONFIG_ARG="--registry-config=/stage-pull-secret/.dockerconfigjson"
+        fi
+
+        BUNDLE_NVR=""
+
+        for REGISTRY_URL in "registry.stage.redhat.io" "registry.redhat.io"; do
+          TEST_IMAGE="${BUNDLE_IMAGE//registry.redhat.io/$REGISTRY_URL}"
+
+          IMAGE_INFO=$(oc image info "$TEST_IMAGE" \
+            --filter-by-os linux/amd64 \
+            $REGISTRY_CONFIG_ARG \
+            -o json 2>&1)
+
+          if [ $? -eq 0 ]; then
+            # Try to get NVR from label
+            BUNDLE_NVR=$(echo "$IMAGE_INFO" | jq -r '.config.config.Labels["com.redhat.art.nvr"] // empty' 2>/dev/null || echo "")
+
+            if [ -n "$BUNDLE_NVR" ]; then
+              break
+            fi
+
+            # Construct from component+version+release labels
+            COMPONENT=$(echo "$IMAGE_INFO" | jq -r '.config.config.Labels["com.redhat.component"] // empty' 2>/dev/null)
+            VERSION=$(echo "$IMAGE_INFO" | jq -r '.config.config.Labels["version"] // empty' 2>/dev/null)
+            RELEASE=$(echo "$IMAGE_INFO" | jq -r '.config.config.Labels["release"] // empty' 2>/dev/null)
+
+            if [ -n "$COMPONENT" ] && [ -n "$VERSION" ] && [ -n "$RELEASE" ]; then
+              BUNDLE_NVR="${COMPONENT}-${VERSION}-${RELEASE}"
+              break
+            fi
+          fi
+        done
+
+        cd /
+        rm -rf "$WORK_DIR"
+
+        if [ -z "$BUNDLE_NVR" ]; then
+          echo "ERROR: Could not extract or construct bundle NVR"
+          echo "unknown" > $(results.operatorNVR.path)
+          exit 0
+        fi
+
+        # Transform bundle NVR to operator NVR
+        # Bundle: mta-operator-metadata-container-8.2.1-...-1
+        # Operator: mta-operator-container-8.2.1-...
+        OPERATOR_NVR=$(echo "$BUNDLE_NVR" | sed 's/-metadata-container/-container/' | sed 's/-[0-9]*$//')
+
+        echo "Operator NVR: $OPERATOR_NVR"
+        echo -n "$OPERATOR_NVR" > $(results.operatorNVR.path)
