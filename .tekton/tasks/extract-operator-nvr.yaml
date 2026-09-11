@@ -61,38 +61,30 @@ spec:
           chmod +x /usr/local/bin/oras
         fi
 
-        # Get FBC application from snapshot JSON
-        FBC_APP=$(echo "$SNAPSHOT_JSON" | jq -r '.application // empty')
-
-        if [ -z "$FBC_APP" ]; then
-          echo "ERROR: Could not extract application name from snapshot JSON"
-          echo "unknown" > $(results.operatorNVR.path)
-          exit 0
-        fi
-
-        FBC_SNAPSHOT=$(oc get snapshots -n art-mta-tenant \
-          -l appstudio.openshift.io/application=$FBC_APP \
-          --sort-by=.metadata.creationTimestamp \
-          -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || echo "")
+        # Get snapshot name from the snapshot JSON passed by pipeline
+        FBC_SNAPSHOT=$(echo "$SNAPSHOT_JSON" | jq -r '.metadata.name // empty')
 
         if [ -z "$FBC_SNAPSHOT" ]; then
-          echo "ERROR: No FBC snapshot found for application: $FBC_APP"
-          echo "unknown" > $(results.operatorNVR.path)
-          exit 0
-        fi
-
-        FBC_IMAGE=$(oc get snapshot $FBC_SNAPSHOT -n art-mta-tenant -o json | \
-          jq -r '.spec.components[0].containerImage')
-
-        if [ -z "$FBC_IMAGE" ]; then
-          echo "ERROR: Could not extract FBC image from snapshot"
-          echo "unknown" > $(results.operatorNVR.path)
-          exit 0
+          echo "ERROR: Could not extract snapshot name from snapshot JSON"
+          echo "This is a critical error - the pipeline cannot continue without a valid snapshot"
+          exit 1
         fi
 
         echo "FBC snapshot: $FBC_SNAPSHOT"
 
+        # Get FBC image from the specific snapshot
+        FBC_IMAGE=$(echo "$SNAPSHOT_JSON" | jq -r '.spec.components[0].containerImage // empty')
+
+        if [ -z "$FBC_IMAGE" ]; then
+          echo "ERROR: Could not extract FBC image from snapshot JSON"
+          echo "This is a critical error - cannot determine which FBC to deploy"
+          exit 1
+        fi
+
+        echo "FBC image: $FBC_IMAGE"
+
         # Discover and pull related-images artifact
+        echo "Discovering related-images artifact..."
         RELATED_IMAGES_DIGEST=$(oras discover --format json "$FBC_IMAGE" 2>/dev/null | \
           jq -r '.manifests[]? | select(.annotations.attachedMediaType == "application/vnd.konflux-ci.attached-artifact.related-images+json") | .digest' || echo "")
 
@@ -101,6 +93,8 @@ spec:
           echo "unknown" > $(results.operatorNVR.path)
           exit 0
         fi
+
+        echo "Related-images artifact: $RELATED_IMAGES_DIGEST"
 
         WORK_DIR="/tmp/related-images-$$"
         mkdir -p "$WORK_DIR"
