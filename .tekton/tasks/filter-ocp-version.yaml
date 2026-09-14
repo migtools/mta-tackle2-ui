@@ -1,0 +1,130 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: filter-ocp-version
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/categories: Utility
+    tekton.dev/tags: filter,ocp
+    tekton.dev/displayName: "Filter OCP Version"
+spec:
+  description: >-
+    Filter snapshots by OCP version. Only allows tests to run on specific OCP versions
+    to avoid wasting cluster resources on unsupported versions.
+
+  params:
+    - name: pipelineRunName
+      type: string
+      description: "Name of the PipelineRun (used to get snapshot name from labels)"
+    - name: allowedOcpVersions
+      type: string
+      default: "4.20,4.21,4.22"
+      description: "Comma-separated list of allowed OCP versions (e.g., 4.20,4.21,4.22)"
+
+  results:
+    - name: shouldRun
+      description: "true if test should run on this OCP version, false to skip"
+    - name: ocpVersion
+      description: "Detected OCP version (e.g., 4.16)"
+
+  steps:
+    - name: check-ocp-version
+      image: registry.redhat.io/openshift4/ose-cli:latest
+      script: |
+        #!/bin/bash
+        set -euo pipefail
+
+        PIPELINERUN_NAME="$(params.pipelineRunName)"
+        ALLOWED_VERSIONS="$(params.allowedOcpVersions)"
+
+        echo "OCP Version Filter"
+        echo "=================="
+        echo "Allowed versions: $ALLOWED_VERSIONS"
+        echo ""
+
+        # Install jq if needed
+        if ! command -v jq &> /dev/null; then
+          curl -sL https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64 -o /usr/local/bin/jq
+          chmod +x /usr/local/bin/jq
+        fi
+
+        # Get snapshot name from PipelineRun label
+        if [ -z "$PIPELINERUN_NAME" ]; then
+          echo "ERROR: pipelineRunName parameter is empty"
+          echo "Defaulting to RUN (no filter)"
+          echo "true" > $(results.shouldRun.path)
+          echo "unknown" > $(results.ocpVersion.path)
+          exit 0
+        fi
+
+        echo "Getting snapshot name from PipelineRun: $PIPELINERUN_NAME"
+        SNAPSHOT_NAME=$(oc get pipelinerun "$PIPELINERUN_NAME" \
+          -o jsonpath='{.metadata.labels.appstudio\.openshift\.io/snapshot}' 2>/dev/null || echo "")
+
+        if [ -z "$SNAPSHOT_NAME" ]; then
+          echo "WARNING: Could not get snapshot name from PipelineRun label"
+          echo "Defaulting to RUN (no filter)"
+          echo "true" > $(results.shouldRun.path)
+          echo "unknown" > $(results.ocpVersion.path)
+          exit 0
+        fi
+
+        echo "Snapshot: $SNAPSHOT_NAME"
+        echo ""
+
+        # Get target_branch annotation from snapshot
+        TARGET_BRANCH=$(oc get snapshot "$SNAPSHOT_NAME" \
+          -o jsonpath='{.metadata.annotations.build\.appstudio\.redhat\.com/target_branch}' 2>/dev/null || echo "")
+
+        if [ -z "$TARGET_BRANCH" ]; then
+          echo "WARNING: No target_branch annotation found on snapshot"
+          echo "Defaulting to RUN (no filter)"
+          echo "true" > $(results.shouldRun.path)
+          echo "unknown" > $(results.ocpVersion.path)
+          exit 0
+        fi
+
+        echo "Target branch: $TARGET_BRANCH"
+
+        # Extract OCP version from target branch
+        # Example: art-mta-8.2-ocp-4.16-assembly-stream-fbc-mta-operator → 4.16
+        if echo "$TARGET_BRANCH" | grep -qE 'ocp-[0-9]+\.[0-9]+'; then
+          OCP_VERSION=$(echo "$TARGET_BRANCH" | grep -oE 'ocp-[0-9]+\.[0-9]+' | sed 's/ocp-//')
+        else
+          echo "WARNING: Could not extract OCP version from target branch"
+          echo "Defaulting to RUN (no filter)"
+          echo "true" > $(results.shouldRun.path)
+          echo "unknown" > $(results.ocpVersion.path)
+          exit 0
+        fi
+
+        echo "Detected OCP version: $OCP_VERSION"
+        echo -n "$OCP_VERSION" > $(results.ocpVersion.path)
+        echo ""
+
+        # Check if version is in allowed list
+        if echo ",$ALLOWED_VERSIONS," | grep -q ",$OCP_VERSION,"; then
+          echo "✅ OCP $OCP_VERSION is in allowed list"
+          echo "   Pipeline will CONTINUE"
+          echo "true" > $(results.shouldRun.path)
+        else
+          echo ""
+          echo "=========================================="
+          echo "ERROR: OCP VERSION NOT ALLOWED"
+          echo "=========================================="
+          echo ""
+          echo "Detected OCP version: $OCP_VERSION"
+          echo "Allowed versions:     $ALLOWED_VERSIONS"
+          echo ""
+          echo "This snapshot targets OCP $OCP_VERSION which is not in the"
+          echo "allowed list for integration testing."
+          echo ""
+          echo "Snapshot: $SNAPSHOT_NAME"
+          echo ""
+          echo "Only OCP versions $ALLOWED_VERSIONS are tested to conserve"
+          echo "cluster pool resources."
+          echo "=========================================="
+          exit 1
+        fi
