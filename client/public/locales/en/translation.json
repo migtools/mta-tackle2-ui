@@ -613,6 +613,7 @@
     "rejected": "Rejected",
     "rejectedAppsAndDeps": "Rejected applications and dependencies or unknown records",
     "reports": "Reports",
+    "reason": "Reason",
     "repository": "Repository",
     "repositoryType": "Repository type",
     "review": "Review",
@@ -1160,6 +1161,17 @@
   "agentic": {
     "agentRuns": {
       "createRun": "Create run",
+      "deleteSelected": "Delete selected",
+      "clearTerminalWithCount": "Clear terminal ({{count}})",
+      "deleteTitle_one": "Delete {{count}} agent run?",
+      "deleteTitle_other": "Delete {{count}} agent runs?",
+      "deleteMessage_one": "Deleting this agent run also removes its owned sandbox, pod, ConfigMaps, and Secrets.",
+      "deleteMessage_other": "Deleting these {{count}} agent runs also removes their owned sandboxes, pods, ConfigMaps, and Secrets.",
+      "activeDeleteWarning_one": "{{count}} selected run is still active and will be stopped.",
+      "activeDeleteWarning_other": "{{count}} selected runs are still active and will be stopped.",
+      "deleteSuccess_one": "{{count}} agent run was successfully deleted.",
+      "deleteSuccess_other": "{{count}} agent runs were successfully deleted.",
+      "brokenRuns": "Broken runs",
       "emptyTitle": "No agent runs",
       "emptyBody": "No AgentRun resources found. Create one to get started.",
       "seededCount_one": "Seeded {{count}} resource",
@@ -1304,6 +1316,12 @@
       "gatewayNotFound": "{{name}} (gateway not found)",
       "gatewayHelper": "One gateway is one model. The controller uses the agent's only gateway when you leave this on Default.",
       "gatewayRequiredHelper": "This agent declares several gateways, so the run must name one — the controller will not choose for you.",
+      "executionMode": "Supervision mode",
+      "executionModeAuto": "Automatic — approve tool calls",
+      "executionModeApprove": "Approval required — ask before tool calls",
+      "executionModeHelper": "Choose whether tool calls proceed automatically or wait for your approval.",
+      "executionModeApproveWarningTitle": "Keep the run details page open to approve tool calls",
+      "executionModeApproveWarningBody": "After creating the run, stay on its details page while it is running. If no viewer is connected to answer an approval request, the request is denied and the agent cannot continue that action.",
       "createdRunMissingName": "Shim returned a created run without metadata.name",
       "instructionsPlaceholder": "Task-specific instructions, composed with the agent's standing prompt",
       "mustBeNumber": "must be a number",
@@ -1393,6 +1411,10 @@
       "stageAriaLabel": "stage {{name}}: {{phase}}",
       "openLiveRun": "Open live run",
       "openRun": "Open run",
+      "approvalViewerTitle": "Keep this page open for workflow approvals",
+      "approvalViewerBody": "This page automatically connects to the active {{stage}} stage. If it asks for approval and no viewer is connected, the tool call is denied.",
+      "loadingLiveStage": "Loading the active workflow stage",
+      "liveStageLoadFailed": "Unable to load the active workflow stage",
       "createDescription": "Creates an AgentWorkflowRun; the controller executes each stage as its own AgentRun, in order, on a shared target branch.",
       "createdWithoutName": "Shim returned a created run without metadata.name",
       "failedLoadWorkflowsTitle": "Failed to load workflows",
@@ -1419,6 +1441,9 @@
       "noRepositoryBody": "{{name}} has no repository URL in the Hub — the harness clones from the Hub record, so these stages cannot start. Set the application's source repository first.",
       "targetBranchInvalid": "Must be a valid git branch name and differ from the application's source branch.",
       "targetBranchHelper": "One branch, all stages: each stage continues the previous stage's work on it (plan commits PLAN.md, execute reads it).",
+      "workflowParameters": "Workflow parameters",
+      "agentParameters": "Stage agent parameters",
+      "paramStages": "Used by: {{stages}}",
       "paramNotDeclared_one": "not declared by stage {{stages}} — cannot be set on a workflow run (params forward to every stage)",
       "paramNotDeclared_other": "not declared by stages {{stages}} — cannot be set on a workflow run (params forward to every stage)",
       "rerunTitle": "Run again: {{name}}",
@@ -1583,6 +1608,13 @@
       "unverifiableAlertTitle_one": "{{names}} cannot pass the controller's verification",
       "unverifiableAlertTitle_other": "{{count}} gateways cannot pass the controller's verification: {{names}}",
       "unverifiableAlertBody": "The controller verifies a gateway by probing GET /v1/models on its endpoint, which the native aws-bedrock and gcp-vertex-ai APIs do not serve, so these gateways never become Ready and every Agent that references them stays Not Ready — runs are blocked behind that hold even with valid credentials. Tracked as <issue>agentic-controller#167</issue>."
+    },
+    "fetchError": {
+      "title": "Unable to load agentic resources",
+      "rbacTitle": "The Hub cannot read agentic resources",
+      "rbacHint": "The Hub's ServiceAccount was denied by Kubernetes RBAC. The Hub reads Agents, Gateways, AgentRuns and their credential Secrets from its own namespace only, so they must be created there, and the tackle-hub ServiceAccount needs a Role granting access to konveyor.io resources in that namespace.",
+      "serverSaid": "Server response:",
+      "retry": "Retry"
     }
   }
 }
