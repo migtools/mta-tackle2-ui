@@ -52,12 +52,32 @@ spec:
           - name: pathInRepo
             value: tasks/test_metadata.yaml
 
-    - name: extract-operator-nvr
+    - name: filter-ocp-version
       runAfter:
         - parse-metadata
       params:
+        - name: pipelineRunName
+          value: $(context.pipelineRun.name)
+        - name: allowedOcpVersions
+          value: "4.20,4.21,4.22"
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/migtools/mta-tackle2-ui
+          - name: revision
+            value: release-0.10
+          - name: pathInRepo
+            value: .tekton/tasks/filter-ocp-version.yaml
+
+    - name: extract-operator-nvr
+      runAfter:
+        - filter-ocp-version
+      params:
         - name: snapshotJson
           value: $(params.SNAPSHOT)
+        - name: pipelineRunName
+          value: $(context.pipelineRun.name)
       taskRef:
         resolver: git
         params:
@@ -128,6 +148,8 @@ spec:
           value: $(tasks.lease-cluster.results.clusterId)
         - name: fbcImage
           value: $(tasks.parse-metadata.results.component-container-image)
+        - name: snapshotJson
+          value: $(params.SNAPSHOT)
       taskRef:
         resolver: git
         params:
@@ -141,6 +163,10 @@ spec:
     - name: run-dast-scan
       runAfter:
         - deploy-operator
+      when:
+        - input: "run"
+          operator: in
+          values: ["run"] # Set to "skip" to skip DAST scan
       params:
         - name: clusterId
           value: $(tasks.lease-cluster.results.clusterId)
@@ -159,6 +185,10 @@ spec:
     - name: run-e2e-tests
       runAfter:
         - run-dast-scan
+      when:
+        - input: "run"
+          operator: in
+          values: ["run"] # Set to "skip" to skip UI tests
       params:
         - name: uiRoute
           value: $(tasks.deploy-operator.results.uiRoute)
@@ -193,9 +223,12 @@ spec:
 
     - name: slack-notification
       when:
-        - input: "$(tasks.run-e2e-tests.status)"
+        - input: "run"
           operator: in
-          values: ["Succeeded", "Failed"]
+          values: ["run"] # Set to "skip" to disable Slack notifications during testing
+        - input: "$(tasks.run-dast-scan.status)"
+          operator: in
+          values: ["Succeeded", "Failed"] # Only send if DAST scan actually ran (means filter passed)
       params:
         - name: testStatus
           value: "$(tasks.run-e2e-tests.status)"
