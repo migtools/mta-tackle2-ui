@@ -63,10 +63,10 @@ The pipeline is composed of modular Tekton Tasks in `.tekton/tasks/`. Each task 
 
 ### Metadata & Notification Tasks
 
-| Task                     | File                                         | Description                                             |
-| ------------------------ | -------------------------------------------- | ------------------------------------------------------- |
-| `extract-operator-nvr`   | `.tekton/tasks/extract-operator-nvr.yaml`    | Extract operator NVR from Konflux FBC related-images artifact |
-| `slack-notification`     | `.tekton/tasks/slack-notification.yaml`      | Send test results to Slack with NVR, status, and link  |
+| Task                   | File                                      | Description                                                   |
+| ---------------------- | ----------------------------------------- | ------------------------------------------------------------- |
+| `extract-operator-nvr` | `.tekton/tasks/extract-operator-nvr.yaml` | Extract operator NVR from Konflux FBC related-images artifact |
+| `slack-notification`   | `.tekton/tasks/slack-notification.yaml`   | Send test results to Slack with NVR, status, and link         |
 
 ### Using tasks in another pipeline
 

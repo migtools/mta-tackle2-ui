@@ -17,17 +17,17 @@ spec:
   params:
     - name: pipelineRunName
       type: string
-      description: 'Name of the PipelineRun (used to get snapshot name from labels)'
+      description: "Name of the PipelineRun (used to get snapshot name from labels)"
     - name: allowedOcpVersions
       type: string
       default: "4.20,4.21,4.22"
-      description: 'Comma-separated list of allowed OCP versions (e.g., 4.20,4.21,4.22)'
+      description: "Comma-separated list of allowed OCP versions (e.g., 4.20,4.21,4.22)"
 
   results:
     - name: shouldRun
-      description: 'true if test should run on this OCP version, false to skip'
+      description: "true if test should run on this OCP version, false to skip"
     - name: ocpVersion
-      description: 'Detected OCP version (e.g., 4.16)'
+      description: "Detected OCP version (e.g., 4.16)"
 
   steps:
     - name: check-ocp-version

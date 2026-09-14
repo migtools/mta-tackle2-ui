@@ -166,7 +166,7 @@ spec:
       when:
         - input: "run"
           operator: in
-          values: ["run"]  # Set to "skip" to skip DAST scan
+          values: ["run"] # Set to "skip" to skip DAST scan
       params:
         - name: clusterId
           value: $(tasks.lease-cluster.results.clusterId)
@@ -188,7 +188,7 @@ spec:
       when:
         - input: "run"
           operator: in
-          values: ["run"]  # Set to "skip" to skip UI tests
+          values: ["run"] # Set to "skip" to skip UI tests
       params:
         - name: uiRoute
           value: $(tasks.deploy-operator.results.uiRoute)
@@ -225,10 +225,10 @@ spec:
       when:
         - input: "run"
           operator: in
-          values: ["run"]  # Set to "skip" to disable Slack notifications during testing
+          values: ["run"] # Set to "skip" to disable Slack notifications during testing
         - input: "$(tasks.run-dast-scan.status)"
           operator: in
-          values: ["Succeeded", "Failed"]  # Only send if DAST scan actually ran (means filter passed)
+          values: ["Succeeded", "Failed"] # Only send if DAST scan actually ran (means filter passed)
       params:
         - name: testStatus
           value: "$(tasks.run-e2e-tests.status)"
