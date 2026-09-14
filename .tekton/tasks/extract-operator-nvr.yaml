@@ -179,4 +179,75 @@ spec:
         OPERATOR_NVR=$(echo "$BUNDLE_NVR" | sed 's/-metadata-container/-container/' | sed 's/-[0-9]*$//')
 
         echo "Operator NVR: $OPERATOR_NVR"
+
+        # VALIDATION: Check if FBC catalog is consistent with related-images
+        echo ""
+        echo "Validating FBC catalog consistency..."
+
+        # Install opm if not available
+        if ! command -v opm &> /dev/null; then
+          OPM_VERSION="v1.49.0"
+          curl -sL "https://github.com/operator-framework/operator-registry/releases/download/${OPM_VERSION}/linux-amd64-opm" \
+            -o /usr/local/bin/opm
+          chmod +x /usr/local/bin/opm
+        fi
+
+        # Extract version from NVR (e.g., mta-operator-container-8.2.1-... → 8.2.1)
+        NVR_VERSION=$(echo "$OPERATOR_NVR" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+
+        # Detect channel from snapshot application name
+        APP_NAME=$(echo "$SNAPSHOT_JSON" | grep -o '"application":"[^"]*"' | cut -d'"' -f4 || echo "")
+        if [ -n "$APP_NAME" ]; then
+          MINOR_VERSION=$(echo "$APP_NAME" | grep -oE '[0-9]+-[0-9]+' | tr '-' '.')
+          CHANNEL_NAME="stable-v${MINOR_VERSION}"
+        else
+          echo "WARNING: Could not determine channel name, skipping validation"
+          echo -n "$OPERATOR_NVR" > $(results.operatorNVR.path)
+          exit 0
+        fi
+
+        echo "Checking catalog channel: $CHANNEL_NAME"
+
+        # Get channel HEAD from catalog
+        CATALOG_HEAD=$(opm render "$FBC_IMAGE" 2>/dev/null | \
+          jq -r --arg channel "$CHANNEL_NAME" \
+            'select(.schema=="olm.channel" and .name==$channel) | .entries[-1].name' 2>/dev/null || echo "")
+
+        if [ -z "$CATALOG_HEAD" ]; then
+          echo "WARNING: Could not extract catalog channel HEAD, skipping validation"
+          echo -n "$OPERATOR_NVR" > $(results.operatorNVR.path)
+          exit 0
+        fi
+
+        # Extract version from catalog HEAD (e.g., mta-operator.v8.2.1 → 8.2.1)
+        CATALOG_VERSION=$(echo "$CATALOG_HEAD" | sed 's/.*\.v//')
+
+        echo "Version from related-images: $NVR_VERSION"
+        echo "Version from catalog HEAD:   $CATALOG_VERSION"
+
+        if [ "$NVR_VERSION" != "$CATALOG_VERSION" ]; then
+          echo ""
+          echo "=========================================="
+          echo "ERROR: FBC CATALOG INCONSISTENCY DETECTED"
+          echo "=========================================="
+          echo ""
+          echo "The FBC snapshot is inconsistent:"
+          echo "  - related-images.json shows: $NVR_VERSION"
+          echo "  - Catalog channel HEAD is:   $CATALOG_VERSION"
+          echo ""
+          echo "This means the FBC was built with $NVR_VERSION bundle references,"
+          echo "but the catalog only has $CATALOG_VERSION available to install."
+          echo ""
+          echo "OLM will deploy $CATALOG_VERSION but NVR extraction reports $NVR_VERSION."
+          echo ""
+          echo "FIX REQUIRED: Update the FBC source repository catalog to include"
+          echo "the $NVR_VERSION bundle in the $CHANNEL_NAME channel."
+          echo ""
+          echo "Snapshot: $SNAPSHOT_NAME"
+          echo "FBC Image: $FBC_IMAGE"
+          echo "=========================================="
+          exit 1
+        fi
+
+        echo "✅ Validation passed: Catalog is consistent"
         echo -n "$OPERATOR_NVR" > $(results.operatorNVR.path)
