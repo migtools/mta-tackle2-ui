@@ -5,8 +5,6 @@ import {
   Button,
   ButtonVariant,
   Content,
-  EmptyState,
-  EmptyStateBody,
   PageSection,
   Toolbar,
   ToolbarContent,
@@ -14,7 +12,6 @@ import {
   ToolbarItem,
   Tooltip,
 } from "@patternfly/react-core";
-import { CubesIcon } from "@patternfly/react-icons";
 import { Table, Tbody, Td, Th, Thead, Tr } from "@patternfly/react-table";
 
 import { TablePersistenceKeyPrefix } from "@app/Constants";
@@ -26,6 +23,7 @@ import { AppPlaceholder } from "@app/components/AppPlaceholder";
 import { ConditionalRender } from "@app/components/ConditionalRender";
 import { ConfirmDialog } from "@app/components/ConfirmDialog";
 import { FilterToolbar, FilterType } from "@app/components/FilterToolbar";
+import { NoDataEmptyState } from "@app/components/NoDataEmptyState";
 import { useNotifications } from "@app/components/NotificationsContext";
 import { SimplePagination } from "@app/components/SimplePagination";
 import {
@@ -55,7 +53,10 @@ import { formatPath, getAxiosErrorMessage } from "@app/utils/utils";
 
 import { CreateRunModal } from "./components/CreateRunModal";
 import { PhaseLabel } from "./components/PhaseLabel";
-import { explanatoryCondition } from "./components/RunConditionSummary";
+import {
+  explanatoryCondition,
+  explanatoryMessage,
+} from "./components/RunConditionSummary";
 
 import "./agent-runs.css";
 
@@ -108,7 +109,7 @@ const AgentRunsPage: React.FC = () => {
         application: runApplicationDisplayName(run, applicationsById),
         phase: run.status?.phase,
         reason: condition?.reason,
-        message: condition?.message,
+        message: explanatoryMessage(condition, run.status?.terminationData),
         isBroken: run.status?.phase === "Failed" || condition !== undefined,
         created: run.metadata.creationTimestamp ?? "",
         durationSeconds: run.status?.duration,
@@ -306,7 +307,7 @@ const AgentRunsPage: React.FC = () => {
                         )
                       }
                     >
-                      {t("agentic.agentRuns.clearTerminalWithCount", {
+                      {t("agentic.agentRuns.deleteFinishedWithCount", {
                         count: terminalFilteredItems.length,
                       })}
                     </Button>
@@ -356,23 +357,10 @@ const AgentRunsPage: React.FC = () => {
               }
               isNoData={currentPageItems.length === 0}
               noDataEmptyState={
-                <EmptyState
-                  headingLevel="h2"
-                  icon={CubesIcon}
-                  titleText={t("agentic.agentRuns.emptyTitle")}
-                >
-                  <EmptyStateBody>
-                    {t("agentic.agentRuns.emptyBody")}
-                  </EmptyStateBody>
-                  {canCreate && (
-                    <Button
-                      variant="primary"
-                      onClick={() => setIsCreateOpen(true)}
-                    >
-                      {t("agentic.agentRuns.createRun")}
-                    </Button>
-                  )}
-                </EmptyState>
+                <NoDataEmptyState
+                  title={t("agentic.agentRuns.emptyTitle")}
+                  description={t("agentic.agentRuns.emptyBody")}
+                />
               }
               numRenderedColumns={numRenderedColumns}
             >
