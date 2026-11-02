@@ -1686,8 +1686,12 @@
       "AgentSucceeded": "Agent fixed",
       "AgentFailed": "Agent failed",
       "NeedsAttention": "Needs attention",
-      "Failed": "Failed"
+      "Failed": "Failed",
+      "PullRequestOpen": "PR open",
+      "PullRequestClosed": "PR closed",
+      "Exhausted": "Needs a person"
     },
+    "attempts": "Attempts: {{count}}/{{max}}",
     "strategy": {
       "auto-bump": "Auto dependency update",
       "agentic": "AI agent (API change)",

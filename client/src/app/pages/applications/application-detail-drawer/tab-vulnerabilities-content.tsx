@@ -73,10 +73,13 @@ const statusColor: Record<CveStatus, LabelColor> = {
   AgentFailed: "red",
   NeedsAttention: "orange",
   Failed: "red",
+  PullRequestOpen: "blue",
+  PullRequestClosed: "grey",
+  Exhausted: "red",
 };
 
 const IN_PROGRESS: CveStatus[] = ["Detected", "Analyzing", "AgentRunning"];
-const CLOSED: CveStatus[] = ["Remediated", "AgentSucceeded", "NotAffected"];
+const CLOSED: CveStatus[] = ["Remediated", "NotAffected"];
 
 const ExternalLink: React.FC<{ href: string; children: React.ReactNode }> = ({
   href,
@@ -230,6 +233,16 @@ export const TabVulnerabilitiesContent: React.FC<{
                           {t(`vulnerabilities.status.${f.status}`)}
                         </Label>
                       </FlexItem>
+                      {(f.attempts ?? 0) > 0 && (
+                        <FlexItem>
+                          <Label isCompact variant="outline">
+                            {t("vulnerabilities.attempts", {
+                              count: f.attempts,
+                              max: 3,
+                            })}
+                          </Label>
+                        </FlexItem>
+                      )}
                       {f.strategy && f.strategy !== "none" && (
                         <FlexItem>
                           <Label isCompact variant="outline">

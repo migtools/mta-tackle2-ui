@@ -769,7 +769,10 @@ export type CveStatus =
   | "AgentSucceeded"
   | "AgentFailed"
   | "NeedsAttention"
-  | "Failed";
+  | "Failed"
+  | "PullRequestOpen"
+  | "PullRequestClosed"
+  | "Exhausted";
 
 export type CveStrategy = "auto-bump" | "agentic" | "none";
 
@@ -824,6 +827,12 @@ export interface CveReachability {
 
 export interface CveFinding {
   cve: string;
+  /** Remediation attempts so far (max 3). */
+  attempts?: number;
+  /** RFC3339; zero time means unset. */
+  lastAttemptAt?: string;
+  noFix?: boolean;
+  pullRequestState?: string;
   title?: string;
   description?: string;
   severity?: string;
