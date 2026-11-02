@@ -27,6 +27,7 @@ import { TabPlatformContent } from "./tab-platform-content";
 import { TabReportsContent } from "./tab-reports-contents";
 import { TabTagsContent } from "./tab-tags-content";
 import { TabTasksContent } from "./tab-tasks-content";
+import { TabVulnerabilitiesContent } from "./tab-vulnerabilities-content";
 
 export interface IApplicationDetailDrawerProps
   extends Pick<IPageDrawerContentProps, "onCloseClick"> {
@@ -42,6 +43,7 @@ enum TabKey {
   Reviews,
   Tasks,
   Platform,
+  Vulnerabilities,
 }
 
 export const ApplicationDetailDrawer: React.FC<
@@ -92,6 +94,15 @@ export const ApplicationDetailDrawer: React.FC<
               title={<TabTitleText>{t("terms.tags")}</TabTitleText>}
             >
               <TabTagsContent application={application} />
+            </Tab>
+
+            <Tab
+              eventKey={TabKey.Vulnerabilities}
+              title={
+                <TabTitleText>{t("vulnerabilities.tabTitle")}</TabTitleText>
+              }
+            >
+              <TabVulnerabilitiesContent application={application} />
             </Tab>
 
             <Tab

@@ -747,6 +747,127 @@ export interface WaveWithStatus extends MigrationWave {
   fullApplications: Application[];
   allStakeholders: StakeholderWithRole[];
 }
+// RHTPA CVE findings (written by the cve-remediation addon / cve-watcher as
+// application facts `cve:<CVE-ID>` and `rhtpa:sbom`).
+export interface RhtpaSbom {
+  id: string;
+  documentId?: string;
+  name?: string;
+  packages: number;
+  generator: string;
+  uploaded: string;
+  consoleUrl?: string;
+  taskId?: number;
+}
+
+export type CveStatus =
+  | "Detected"
+  | "Analyzing"
+  | "Remediated"
+  | "NotAffected"
+  | "AgentRunning"
+  | "AgentSucceeded"
+  | "AgentFailed"
+  | "NeedsAttention"
+  | "Failed";
+
+export type CveStrategy = "auto-bump" | "agentic" | "none";
+
+export type CveReachabilityVerdict =
+  | "exploitable"
+  | "reachable"
+  | "unreachable"
+  | "unknown";
+
+export interface CveVexStatement {
+  status: string;
+  justification?: string;
+  impactStatement?: string;
+  actionStatement?: string;
+  products?: string[];
+}
+
+/** rgctl `vuln analyze` (OSV reachability + OpenVEX) result. */
+export interface CveReachability {
+  tool: string;
+  osvId: string;
+  verdict: CveReachabilityVerdict;
+  verdictReason?: string;
+  depsVerdict?: string;
+  exploitability?: string;
+  notes?: string;
+  methodData: "advisory" | "catalog" | "none";
+  affectedClasses?: string[];
+  affectedMethods?: string[];
+  triggerCondition?: string;
+  sink?: string;
+  sinkResolution?: string;
+  cfgAvailable: boolean;
+  callers?: string[];
+  callSites?: {
+    caller: string;
+    targetMethod: string;
+    file: string;
+    line: number;
+  }[];
+  paths?: { from: string; to: string; hops: number }[];
+  depsMatches?: {
+    name: string;
+    version: string;
+    inRange: boolean;
+    provenance?: string;
+  }[];
+  vex: CveVexStatement;
+  openvex?: Record<string, unknown>;
+  vexAdjusted?: boolean;
+}
+
+export interface CveFinding {
+  cve: string;
+  title?: string;
+  description?: string;
+  severity?: string;
+  score?: number;
+  vector?: string;
+  advisories?: {
+    id: string;
+    title?: string;
+    source?: string;
+    url?: string;
+    fixedVersions?: string[];
+  }[];
+  package: {
+    purl: string;
+    group?: string;
+    name: string;
+    version: string;
+    direct: boolean;
+    ecosystem?: "maven" | "golang";
+  };
+  fixedVersion?: string;
+  /** Set when the fix lives in another module path (Go major version). */
+  fixedModule?: string;
+  redHatFix?: string;
+  status: CveStatus;
+  strategy?: CveStrategy;
+  strategyReason?: string;
+  reachability?: CveReachability;
+  buildLog?: string;
+  branch?: string;
+  branchUrl?: string;
+  compareUrl?: string;
+  pullRequestUrl?: string;
+  pullRequestNumber?: number;
+  agentRun?: string;
+  agentRunPhase?: string;
+  taskId?: number;
+  sbomId?: string;
+  consoleUrl?: string;
+  message?: string;
+  detectedAt: string;
+  updatedAt: string;
+}
+
 export type UnstructuredFact = never;
 
 export type Fact = {
