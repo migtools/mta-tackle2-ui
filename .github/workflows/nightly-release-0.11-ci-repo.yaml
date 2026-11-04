@@ -1,4 +1,4 @@
-name: Nightly CI (repo level @release-0.9)
+name: Nightly CI (repo level @release-0.11)
 
 on:
   schedule:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   nightly:
-    uses: konveyor/tackle2-ui/.github/workflows/ci-repo.yml@release-0.9
+    uses: konveyor/tackle2-ui/.github/workflows/ci-repo.yml@release-0.11
     secrets: inherit
     with:
-      checkout_ref: release-0.9
+      checkout_ref: release-0.11

@@ -3,6 +3,7 @@ import {
   clickByText,
   clickJs,
   clickWithinByText,
+  confirm,
   inputText,
   selectUserPerspective,
   submitForm,
@@ -115,6 +116,7 @@ export class CustomMigrationTarget {
   public delete() {
     this.expandActionsMenu();
     cy.contains(button, deleteAction).click();
+    confirm();
   }
 
   public static fillName(name: string) {
@@ -122,8 +124,8 @@ export class CustomMigrationTarget {
   }
 
   public static uploadImage(imagePath: string) {
-    cy.get("div[class='pf-v6-c-file-upload__file-details']")
-      .next('input[type="file"]', { timeout: 2 * SEC })
+    cy.get('[role="dialog"]')
+      .find(CustomMigrationTargetView.imageFileInput)
       .selectFile(`fixtures/${imagePath}`, {
         timeout: 120 * SEC,
         force: true,
