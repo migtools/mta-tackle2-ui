@@ -1,10 +1,11 @@
 /**
- * The target-branch block of the run detail pages: the branch link, a
- * GitHub-only commit feed (the one host whose REST API is CORS-open and
- * unauthenticated — 60 req/hr/IP, so polling is frugal: 60s while the run
- * is live, exactly once when terminal), and the by-convention stage output
- * files (PLAN.md, .konveyor/analysis.json) the workflow stages chain
- * through on that branch.
+ * The target-branch block of the run detail pages: the branch link, the
+ * latest commit on it (a GitHub-only feed — the one host whose REST API is
+ * CORS-open and unauthenticated, 60 req/hr/IP, so polling is frugal: 60s
+ * while the run is live, exactly once when terminal, one commit per
+ * request), and the by-convention stage output files (PLAN.md,
+ * .konveyor/analysis.json) the workflow stages chain through on that
+ * branch.
  */
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
@@ -198,7 +199,7 @@ export function BranchPanel({
       inFlight = true;
       try {
         const res = await fetch(
-          `https://api.github.com/repos/${owner}/${repo}/commits?sha=${encodeURIComponent(targetBranch)}&per_page=15`
+          `https://api.github.com/repos/${owner}/${repo}/commits?sha=${encodeURIComponent(targetBranch)}&per_page=1`
         );
         if (disposed) return;
         if (res.status === 404) {
@@ -358,29 +359,33 @@ export function BranchPanel({
           {commits !== null &&
             commits.length > 0 &&
             (feed === "ok" || feed === "network-error") &&
-            commits.map((c) => (
-              <div
-                key={c.sha}
-                style={{
-                  display: "flex",
-                  alignItems: "baseline",
-                  gap: "0.5rem",
-                  marginBottom: "0.25rem",
-                }}
-              >
-                <a href={c.htmlUrl} target="_blank" rel="noreferrer">
-                  <code>{c.sha.slice(0, 7)}</code>
-                </a>
-                {c.message.startsWith(PROGRESS_PREFIX) ? (
-                  <Label isCompact color="blue">
-                    {c.message}
-                  </Label>
-                ) : (
-                  <span>{c.message}</span>
-                )}
-                <span style={muted}>{formatCommitAge(c.date)}</span>
-              </div>
-            ))}
+            (() => {
+              // Only the head: one line saying a push happened and what it
+              // was — the history lives one click away on the branch.
+              const c = commits[0];
+              return (
+                <div
+                  key={c.sha}
+                  style={{
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: "0.5rem",
+                  }}
+                >
+                  <a href={c.htmlUrl} target="_blank" rel="noreferrer">
+                    <code>{c.sha.slice(0, 7)}</code>
+                  </a>
+                  {c.message.startsWith(PROGRESS_PREFIX) ? (
+                    <Label isCompact color="blue">
+                      {c.message}
+                    </Label>
+                  ) : (
+                    <span>{c.message}</span>
+                  )}
+                  <span style={muted}>{formatCommitAge(c.date)}</span>
+                </div>
+              );
+            })()}
         </div>
       )}
 
