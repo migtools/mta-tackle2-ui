@@ -9,7 +9,7 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Content, Label } from "@patternfly/react-core";
+import { Alert, Button, Content, Label, Spinner } from "@patternfly/react-core";
 
 import type { Application } from "@app/api/models";
 
@@ -311,9 +311,19 @@ export function BranchPanel({
 
       {gh && (
         <div style={{ marginTop: "0.75rem" }}>
-          {feed === "not-pushed" && (
-            <div style={muted}>{t("agentic.runDetail.feedNotPushed")}</div>
-          )}
+          {feed === "not-pushed" &&
+            (isTerminal ? (
+              // The run is over and nothing arrived: that is the outcome,
+              // not a wait.
+              <div style={muted}>
+                {t("agentic.runDetail.feedNotPushedTerminal")}
+              </div>
+            ) : (
+              <div style={{ ...muted, display: "flex", gap: "0.5rem" }}>
+                <Spinner size="sm" />
+                <span>{t("agentic.runDetail.feedNotPushedLive")}</span>
+              </div>
+            ))}
           {feed === "rate-limited" && (
             <Alert
               variant="info"

@@ -1194,7 +1194,6 @@
       "fileNotPresentYet": "not present yet",
       "stageOutputs": "Stage outputs (by convention):",
       "feedGitHubOnly": "commit feed is available for github.com repositories only",
-      "feedNotPushed": "branch not pushed yet — the harness pushes after its first commit",
       "feedRateLimited": "GitHub API rate limit reached — commit feed paused",
       "feedNetworkError": "commit feed unavailable (network error)",
       "feedNetworkErrorRetrying": "commit feed unavailable (network error) — retrying",
@@ -1202,7 +1201,9 @@
       "noCommitsYet": "no commits on this branch yet",
       "collectionLabel": "collection: {{name}}",
       "conditionTooltip": "{{type}}={{status}}{{since}}",
-      "conditionSince": " since {{time}}"
+      "conditionSince": " since {{time}}",
+      "feedNotPushedLive": "Waiting for the first push",
+      "feedNotPushedTerminal": "Nothing was pushed to this branch"
     },
     "chat": {
       "title": "Agent session",
