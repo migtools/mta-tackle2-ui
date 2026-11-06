@@ -282,3 +282,96 @@
 .chat-ask .pf-v6-c-form {
   gap: 0.75rem;
 }
+
+/* ------------------------------------------------------------- logs tab */
+.run-logs {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 24rem;
+}
+.run-logs .pf-v6-c-toolbar {
+  background: transparent;
+  padding-bottom: 0.25rem;
+}
+.run-logs-terminal {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  font-family: "Red Hat Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow: auto;
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+}
+.run-logs-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.run-logs-empty,
+.run-logs-error {
+  color: #888;
+  font-style: italic;
+}
+.run-logs-error {
+  color: #f66;
+}
+.run-logs-truncated {
+  color: var(--pf-t--global--text--color--status--warning--default);
+}
+.run-logs-count {
+  color: var(--pf-t--global--text--color--subtle);
+}
+/* ANSI SGR colors (see ansi.ts). */
+.ansi-bold {
+  font-weight: 700;
+}
+.ansi-black {
+  color: #567;
+}
+.ansi-red {
+  color: #e06c75;
+}
+.ansi-green {
+  color: #98c379;
+}
+.ansi-yellow {
+  color: #e5c07b;
+}
+.ansi-blue {
+  color: #61afef;
+}
+.ansi-magenta {
+  color: #c678dd;
+}
+.ansi-cyan {
+  color: #56b6c2;
+}
+.ansi-white {
+  color: #d4d4d4;
+}
+.ansi-bright-black {
+  color: #888;
+}
+.ansi-bright-red {
+  color: #ff7b86;
+}
+.ansi-bright-green {
+  color: #b1e08a;
+}
+.ansi-bright-yellow {
+  color: #f5d38f;
+}
+.ansi-bright-blue {
+  color: #83c4ff;
+}
+.ansi-bright-magenta {
+  color: #dfa3f5;
+}
+.ansi-bright-cyan {
+  color: #87d5da;
+}
+.ansi-bright-white {
+  color: #fff;
+}

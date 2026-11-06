@@ -1650,6 +1650,18 @@
       "rbacHint": "The Hub's ServiceAccount was denied by Kubernetes RBAC. The Hub reads Agents, Gateways, AgentRuns and their credential Secrets from its own namespace only, so they must be created there, and the tackle-hub ServiceAccount needs a Role granting access to konveyor.io resources in that namespace.",
       "serverSaid": "Server response:",
       "retry": "Retry"
+    },
+    "logs": {
+      "title": "Logs",
+      "live": "Live",
+      "saved": "Saved",
+      "lineCount": "{{count}} lines",
+      "resumeFollow": "Resume following",
+      "download": "Download",
+      "fullscreen": "Fullscreen",
+      "truncated": "Showing last {{shown}} of {{total}} lines",
+      "empty": "No log output yet.",
+      "notFound": "No log was recorded for this run."
     }
   },
   "vulnerabilities": {
