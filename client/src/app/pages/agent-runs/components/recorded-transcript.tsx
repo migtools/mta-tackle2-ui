@@ -5,6 +5,7 @@ import {
   Chatbot,
   ChatbotAlert,
   ChatbotContent,
+  ChatbotDisplayMode,
   ChatbotHeader,
   ChatbotHeaderActions,
   ChatbotHeaderMain,
@@ -134,7 +135,11 @@ export function RecordedTranscript({
 
   const botName = agentRef ?? t("agentic.chat.agentName");
   const chatbot = (
-    <Chatbot className="agent-run-chatbot" ariaLabel={t("agentic.chat.title")}>
+    <Chatbot
+      className="agent-run-chatbot"
+      displayMode={ChatbotDisplayMode.embedded}
+      ariaLabel={t("agentic.chat.title")}
+    >
       <ChatbotHeader>
         <ChatbotHeaderMain>
           <ChatbotHeaderTitle>

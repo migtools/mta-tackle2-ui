@@ -2,7 +2,9 @@
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
-  min-height: 0;
+  /* The page scrolls as a whole, so the run panel gets a floor rather
+   * than being squeezed to nothing by the sections above it. */
+  min-height: 32rem;
 }
 
 /* A bounded height is what makes the transcript scroll INSIDE MessageBox
@@ -287,7 +289,7 @@
 .run-logs {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1 1 auto;
   min-height: 24rem;
 }
 .run-logs .pf-v6-c-toolbar {
@@ -376,11 +378,23 @@
   color: #fff;
 }
 
-/* RunPanel: transcript/logs/details tabs under the run header. */
+/* RunPanel: transcript/logs/details tabs under the run header. PF6 Tabs
+ * renders the tab panels as siblings of the tabs root, inside the same
+ * run section, so the section is the flex column that shares the height
+ * between the tab bar and the active panel. */
 .run-panel-tabs {
-  height: 100%;
   display: flex;
   flex-direction: column;
+  flex: 0 0 auto;
+}
+.run-detail-chat-section .pf-v6-c-tab-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.run-detail-chat-section .pf-v6-c-tab-content[hidden] {
+  display: none;
 }
 
 .run-panel-notice {
