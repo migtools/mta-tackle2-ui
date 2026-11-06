@@ -31,3 +31,6 @@ npm-debug.log*
 
 # Intellij IDEA
 .idea/
+
+# Superpowers brainstorm/SDD artifacts
+.superpowers/

@@ -90,6 +90,9 @@ const startTranscript = (
       _name: string,
       opts: { onLine: (l: unknown) => void; onStatus?: (s: unknown) => void }
     ) => {
+      // Real fetch defers by at least a microtask; a synchronous mock
+      // would fire before StrictMode's cleanup aborts the first stream.
+      await Promise.resolve();
       opts.onStatus?.(status);
       for (const line of lines) opts.onLine(line);
     }

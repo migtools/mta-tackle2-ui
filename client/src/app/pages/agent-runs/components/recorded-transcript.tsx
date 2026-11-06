@@ -60,7 +60,8 @@ export function RecordedTranscript({
 
   useEffect(() => {
     const controller = new AbortController();
-    setLines([]);
+    // No state reset here: the pages key this component by run name, so a
+    // different run starts fresh, and an isLive flip must keep the lines.
     (async () => {
       try {
         await streamAgentRunTranscript(runName, {

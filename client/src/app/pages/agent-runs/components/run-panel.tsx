@@ -72,7 +72,8 @@ export function RunPanel({
 
   // A finished run whose transcript is absent has nothing to show on the
   // transcript tab: land the viewer on the log instead — but never yank a
-  // tab the user chose.
+  // tab the user chose. The flip is async because the transcript status
+  // only arrives once the stream's first response does.
   useEffect(() => {
     if (userPicked.current || !finished) return;
     if (
@@ -80,6 +81,7 @@ export function RunPanel({
       transcriptStatus === "skipped" ||
       (unrecordedMode && finished)
     ) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setOwnTab("logs");
     }
   }, [finished, transcriptStatus, unrecordedMode]);

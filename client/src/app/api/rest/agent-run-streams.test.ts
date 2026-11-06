@@ -3,14 +3,8 @@ import { ReadableStream } from "node:stream/web";
 import { TextDecoder, TextEncoder } from "node:util";
 
 import type { SessionUpdate } from "@app/api/agentic/acp";
-
-// The jest environment lacks the browser's TextDecoder global, which the
-// stream client itself uses.
-if (typeof globalThis.TextDecoder === "undefined") {
-  (globalThis as { TextDecoder?: unknown }).TextDecoder = TextDecoder;
-}
-import { reduceUpdate } from "@app/pages/agent-runs/transcript/transcript-model";
 import type { ChatItem } from "@app/pages/agent-runs/transcript/transcript-model";
+import { reduceUpdate } from "@app/pages/agent-runs/transcript/transcript-model";
 
 import {
   frameToUpdate,
@@ -18,6 +12,12 @@ import {
   streamAgentRunTranscript,
 } from "./agent-run-streams";
 import type { RecordedLine } from "./agent-run-streams";
+
+// The jest environment lacks the browser's TextDecoder global, which the
+// stream client itself uses.
+if (typeof globalThis.TextDecoder === "undefined") {
+  (globalThis as { TextDecoder?: unknown }).TextDecoder = TextDecoder;
+}
 
 jest.mock("@app/Constants", () => ({
   ...jest.requireActual("@app/Constants"),

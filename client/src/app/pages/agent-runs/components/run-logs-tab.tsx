@@ -48,8 +48,6 @@ export function RunLogsTab({
   const [following, setFollowing] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const scrollerRef = useRef<HTMLDivElement>(null);
-  const followingRef = useRef(true);
-  followingRef.current = following;
 
   useEffect(() => {
     const controller = new AbortController();
