@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { AxiosError } from "axios";
 import { Trans, useTranslation } from "react-i18next";
-import { Link, useHistory, useParams } from "react-router-dom";
+import { useHistory, useLocation, useParams } from "react-router-dom";
 import {
   Alert,
   Bullseye,
@@ -12,8 +12,6 @@ import {
   DescriptionListGroup,
   DescriptionListTerm,
   PageSection,
-  ProgressStep,
-  ProgressStepper,
   Spinner,
 } from "@patternfly/react-core";
 import { RedoIcon } from "@patternfly/react-icons";
@@ -22,7 +20,6 @@ import type { WorkflowRunDetailsRoute } from "@app/Paths";
 import { DevPaths } from "@app/Paths";
 import type {
   AgentRun,
-  AgentRunPhase,
   AgentWorkflowRunStageStatus,
   ExecutionMode,
 } from "@app/api/agentic/contract";
@@ -31,10 +28,10 @@ import { useHasSomeScopes } from "@app/auth";
 import { AgenticFetchError } from "@app/components/AgenticFetchError";
 import { PageHeader } from "@app/components/PageHeader";
 import { BranchPanel } from "@app/pages/agent-runs/components/BranchPanel";
-import { ChatPanel } from "@app/pages/agent-runs/components/ChatPanel";
 import { PhaseLabel } from "@app/pages/agent-runs/components/PhaseLabel";
 import { RunConditionSummary } from "@app/pages/agent-runs/components/RunConditionSummary";
-import { useFetchAgentRun } from "@app/queries/agent-runs";
+import { RunPanel } from "@app/pages/agent-runs/components/run-panel";
+import { useFetchAgentRunsByNames } from "@app/queries/agent-runs";
 import { useFetchApplications } from "@app/queries/applications";
 import { useFetchWorkflowRun } from "@app/queries/workflow-runs";
 import { agenticWorkflowRunsCreateScopes } from "@app/scopes";
@@ -47,40 +44,12 @@ import {
 import { formatPath } from "@app/utils/utils";
 
 import { CreateWorkflowRunModal } from "./components/CreateWorkflowRunModal";
+import { StageCards, defaultStage } from "./components/stage-cards";
 
 import "@app/pages/agent-runs/agent-runs.css";
 
 /**
- * Map a stage phase to a ProgressStepper variant. Ready=False on the run
- * while a stage executes is the normal healthy state — only Failed is an
- * error here.
- */
-function stepVariant(phase?: AgentRunPhase) {
-  switch (phase) {
-    case "Succeeded":
-      return "success" as const;
-    case "Failed":
-      return "danger" as const;
-    case "Running":
-      return "info" as const;
-    default:
-      return "pending" as const;
-  }
-}
-
-/** The child AgentRun whose ACP viewer belongs on the workflow page. */
-function liveStageOf(
-  stages: AgentWorkflowRunStageStatus[],
-  currentStage?: string
-): AgentWorkflowRunStageStatus | undefined {
-  const current = stages.find((stage) => stage.name === currentStage);
-  return current?.phase === "Running" && current.agentRunName
-    ? current
-    : stages.find((stage) => stage.phase === "Running" && !!stage.agentRunName);
-}
-
-/**
- * Supervision mode the live stage actually runs under. The controller
+ * Supervision mode the selected stage actually runs under. The controller
  * resolves the workflow stage's `execution` into the stage's own AgentRun
  * spec, so that AgentRun is the authoritative value; the stage status is
  * the fallback while the AgentRun is still loading. Absent or unrecognized
@@ -102,22 +71,28 @@ function resolveExecutionMode(
 const WorkflowRunDetailPage: React.FC = () => {
   const { t } = useTranslation();
   const history = useHistory();
+  const location = useLocation();
   const { runName } = useParams<WorkflowRunDetailsRoute>();
   const { workflowRun, isLoading, fetchError } = useFetchWorkflowRun(runName);
   const workflowFinished = isTerminalPhase(workflowRun?.status?.phase);
-  const liveStage = workflowFinished
-    ? undefined
-    : liveStageOf(
-        workflowRun?.status?.stages ?? [],
-        workflowRun?.status?.currentStage
-      );
-  const liveRunName = liveStage?.agentRunName ?? "";
-  const {
-    agentRun: liveAgentRun,
-    isLoading: liveRunLoading,
-    fetchError: liveRunFetchError,
-  } = useFetchAgentRun(liveRunName);
-  const liveStageMode = resolveExecutionMode(liveStage, liveAgentRun);
+  const stages = workflowRun?.status?.stages ?? [];
+  const currentStage = workflowRun?.status?.currentStage;
+  // The selected stage lives in ?stage=; without it, land on the stage a
+  // viewer is here for (running, else failed, else the newest with a run).
+  const stageParam = new URLSearchParams(location.search).get("stage");
+  const selected =
+    stages.find((s) => s.name === stageParam)?.name ??
+    defaultStage(stages, workflowFinished ? undefined : currentStage);
+  const selectedStage = stages.find((s) => s.name === selected);
+  const selectedRunName = selectedStage?.agentRunName ?? "";
+  // All stages' child runs, in parallel: the cards show each stage's
+  // agent and duration, the panel shows the selected one's.
+  const { runs } = useFetchAgentRunsByNames(
+    stages.map((s) => s.agentRunName ?? "").filter(Boolean)
+  );
+  const selectedRun = selectedRunName ? runs[selectedRunName] : undefined;
+  const selectedLive = !workflowFinished && selectedStage?.phase === "Running";
+  const stageMode = resolveExecutionMode(selectedStage, selectedRun);
   // "Run again": the spec is immutable and the hub has no delete, so a
   // prefilled create is the one re-run shape there is.
   const canCreate = useHasSomeScopes(agenticWorkflowRunsCreateScopes);
@@ -129,6 +104,13 @@ const WorkflowRunDetailPage: React.FC = () => {
     { title: t("terms.workflowRuns"), path: DevPaths.workflowRuns },
     { title: runName },
   ];
+
+  const selectStage = (stage: string) => {
+    history.replace({
+      pathname: location.pathname,
+      search: stage ? `?stage=${encodeURIComponent(stage)}` : "",
+    });
+  };
 
   if (isLoading && !workflowRun) {
     return (
@@ -169,8 +151,6 @@ const WorkflowRunDetailPage: React.FC = () => {
     );
   }
 
-  const stages = workflowRun.status?.stages ?? [];
-  const currentStage = workflowRun.status?.currentStage;
   const coordinates = runHubCoordinates(workflowRun.spec.env);
   const application = applications.find((a) =>
     runBelongsToApplication(workflowRun, a.id)
@@ -263,40 +243,12 @@ const WorkflowRunDetailPage: React.FC = () => {
             {t("agentic.workflowRuns.noStageStatusBody")}
           </Alert>
         ) : (
-          <ProgressStepper
-            aria-label={t("agentic.workflowRuns.stagesAriaLabel")}
-          >
-            {stages.map((stage) => (
-              <ProgressStep
-                key={stage.name}
-                variant={stepVariant(stage.phase)}
-                isCurrent={stage.name === currentStage}
-                id={`stage-${stage.name}`}
-                titleId={`stage-${stage.name}-title`}
-                aria-label={t("agentic.workflowRuns.stageAriaLabel", {
-                  name: stage.name,
-                  phase: stage.phase ?? t("taskState.Pending"),
-                })}
-                description={
-                  stage.agentRunName ? (
-                    <Link
-                      to={formatPath(DevPaths.agentRunDetails, {
-                        runName: stage.agentRunName,
-                      })}
-                    >
-                      {stage.phase === "Running"
-                        ? t("agentic.workflowRuns.openLiveRun")
-                        : t("agentic.workflowRuns.openRun")}
-                    </Link>
-                  ) : (
-                    (stage.phase ?? t("taskState.Pending"))
-                  )
-                }
-              >
-                {stage.name}
-              </ProgressStep>
-            ))}
-          </ProgressStepper>
+          <StageCards
+            stages={stages}
+            runs={runs}
+            selected={selected}
+            onSelect={selectStage}
+          />
         )}
 
         {coordinates.targetBranch && (
@@ -307,14 +259,14 @@ const WorkflowRunDetailPage: React.FC = () => {
           />
         )}
       </PageSection>
-      {liveStage && (
-        <PageSection
-          isFilled
-          hasBodyWrapper={false}
-          className="run-detail-chat-section"
-          padding={{ default: "padding" }}
-        >
-          {liveStageMode === "approve" ? (
+      <PageSection
+        isFilled
+        hasBodyWrapper={false}
+        className="run-detail-chat-section"
+        padding={{ default: "padding" }}
+      >
+        {selectedLive &&
+          (stageMode === "approve" ? (
             <Alert
               variant="warning"
               isInline
@@ -322,7 +274,7 @@ const WorkflowRunDetailPage: React.FC = () => {
               style={{ marginBottom: "1rem" }}
             >
               {t("agentic.workflowRuns.approvalViewerBody", {
-                stage: liveStage.name,
+                stage: selectedStage?.name,
               })}
             </Alert>
           ) : (
@@ -331,40 +283,35 @@ const WorkflowRunDetailPage: React.FC = () => {
               isInline
               isPlain
               title={t("agentic.workflowRuns.autoModeViewerNote", {
-                stage: liveStage.name,
+                stage: selectedStage?.name,
               })}
               style={{ marginBottom: "1rem" }}
             />
-          )}
-          {liveRunFetchError && !liveAgentRun && (
-            <Alert
-              variant="danger"
-              isInline
-              title={t("agentic.workflowRuns.liveStageLoadFailed")}
-            >
-              {liveRunFetchError instanceof Error
-                ? liveRunFetchError.message
-                : String(liveRunFetchError)}
-            </Alert>
-          )}
-          {liveRunLoading && !liveAgentRun && (
-            <Bullseye>
-              <Spinner
-                aria-label={t("agentic.workflowRuns.loadingLiveStage")}
-              />
-            </Bullseye>
-          )}
-          {liveAgentRun && (
-            <ChatPanel
-              key={liveRunName}
-              runName={liveRunName}
-              status={liveAgentRun.status}
-              agentRef={liveAgentRun.spec.agentRef}
-              targetBranch={coordinates.targetBranch}
-            />
-          )}
-        </PageSection>
-      )}
+          ))}
+        {selectedRun ? (
+          <RunPanel
+            key={selectedRunName}
+            run={selectedRun}
+            stageInstructions={selectedStage?.instructions}
+            targetBranch={coordinates.targetBranch}
+          />
+        ) : selectedRunName ? (
+          <Bullseye>
+            <Spinner aria-label={t("agentic.workflowRuns.loadingLiveStage")} />
+          </Bullseye>
+        ) : (
+          selectedStage && (
+            <div className="stage-not-started">
+              {selectedStage.instructions && (
+                <pre className="run-details-instructions">
+                  {selectedStage.instructions}
+                </pre>
+              )}
+              <div>{t("agentic.workflowRuns.stageNotStarted")}</div>
+            </div>
+          )
+        )}
+      </PageSection>
       {rerunOpen && (
         <CreateWorkflowRunModal
           prefill={workflowRun}

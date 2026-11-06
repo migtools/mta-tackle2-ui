@@ -401,3 +401,38 @@
   max-height: 16rem;
   overflow-y: auto;
 }
+
+/* Workflow-run stage cards. */
+.stage-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.stage-card {
+  cursor: pointer;
+  min-width: 12rem;
+}
+
+.stage-card-selected {
+  outline: 2px solid var(--pf-v6-global--primary-color--100);
+}
+
+.stage-card-name {
+  font-weight: var(--pf-v6-global--FontWeight--bold);
+  margin-left: 0.25rem;
+  margin-right: 0.5rem;
+}
+
+.stage-card-duration {
+  color: var(--pf-v6-global--Color--200);
+}
+
+.stage-card-not-started {
+  color: var(--pf-v6-global--Color--200);
+}
+
+.stage-not-started {
+  padding: 1rem;
+}

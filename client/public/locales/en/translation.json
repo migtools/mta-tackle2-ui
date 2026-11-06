@@ -1482,7 +1482,9 @@
       "paramNotDeclared_other": "not declared by stages {{stages}} — cannot be set on a workflow run (params forward to every stage)",
       "rerunTitle": "Run again: {{name}}",
       "prefillWorkflowMissing": "The earlier run's workflow \"{{name}}\" no longer exists — pick another workflow.",
-      "autoModeViewerNote": "Connected to the active {{stage}} stage. Tool calls are approved automatically in auto mode."
+      "autoModeViewerNote": "Connected to the active {{stage}} stage. Tool calls are approved automatically in auto mode.",
+      "notStarted": "Not started",
+      "stageNotStarted": "This stage hasn't started."
     },
     "skills": {
       "createSkillCard": "Create skill card",

@@ -1,24 +1,26 @@
 import "@testing-library/jest-dom";
 import { createElement } from "react";
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import userEvent from "@testing-library/user-event";
+import { createMemoryHistory } from "history";
+import { Router } from "react-router-dom";
 
 import type {
   AgentRun,
   AgentWorkflowRun,
   AgentWorkflowRunPhase,
+  AgentWorkflowRunStageStatus,
   ExecutionSpec,
 } from "@app/api/agentic/contract";
 
 import WorkflowRunDetailPage from "./workflow-run-detail-page";
 
 const mockUseFetchWorkflowRun = jest.fn();
-const mockUseFetchAgentRun = jest.fn();
-const mockChatPanel = jest.fn();
+const mockUseFetchAgentRunsByNames = jest.fn();
+const mockRunPanel = jest.fn();
 
 jest.mock("react-router-dom", () => ({
   ...jest.requireActual("react-router-dom"),
-  useHistory: () => ({ push: jest.fn() }),
   useParams: () => ({ runName: "workflow-run" }),
 }));
 
@@ -27,7 +29,8 @@ jest.mock("@app/queries/workflow-runs", () => ({
 }));
 
 jest.mock("@app/queries/agent-runs", () => ({
-  useFetchAgentRun: (...args: unknown[]) => mockUseFetchAgentRun(...args),
+  useFetchAgentRunsByNames: (...args: unknown[]) =>
+    mockUseFetchAgentRunsByNames(...args),
 }));
 
 jest.mock("@app/queries/applications", () => ({
@@ -38,18 +41,29 @@ jest.mock("@app/auth", () => ({
   useHasSomeScopes: () => true,
 }));
 
-jest.mock("@app/pages/agent-runs/components/ChatPanel", () => ({
-  ChatPanel: (props: unknown) => {
-    mockChatPanel(props);
-    return createElement("div", { "data-testid": "chat-panel" });
+jest.mock("@app/pages/agent-runs/components/run-panel", () => ({
+  RunPanel: (props: unknown) => {
+    mockRunPanel(props);
+    return createElement("div", { "data-testid": "run-panel" });
   },
 }));
 
+const stagesWith = (
+  ...stages: Partial<AgentWorkflowRunStageStatus>[]
+): AgentWorkflowRunStageStatus[] =>
+  stages.map((s, i) => ({
+    name: s.name ?? `stage-${i}`,
+    phase: s.phase,
+    agentRunName: s.agentRunName,
+    agentRef: s.agentRef,
+    instructions: s.instructions,
+    execution: s.execution,
+  }));
+
 const workflowRun = (
   phase: AgentWorkflowRunPhase,
-  stagePhase: "Pending" | "Running" | "Succeeded" | "Failed",
-  agentRunName?: string,
-  stageExecution?: ExecutionSpec
+  stages: AgentWorkflowRunStageStatus[],
+  extraStatus: Partial<AgentWorkflowRun["status"]> = {}
 ): AgentWorkflowRun => ({
   metadata: {
     name: "workflow-run",
@@ -62,50 +76,255 @@ const workflowRun = (
   status: {
     phase,
     currentStage: "plan",
-    stages: [
-      {
-        name: "plan",
-        phase: stagePhase,
-        agentRunName,
-        execution: stageExecution,
-      },
-    ],
+    stages,
+    ...extraStatus,
   },
 });
 
-const agentRun: AgentRun = {
-  metadata: { name: "ui-plan" },
-  spec: { agentRef: "planner" },
+const childRun = (name: string, agentRef: string): AgentRun => ({
+  metadata: { name },
+  spec: { agentRef },
   status: {
     phase: "Running",
     conditions: [{ type: "ACPReady", status: "True" }],
   },
-};
+});
+
+const history = createMemoryHistory();
+const renderPage = () =>
+  render(
+    <Router history={history}>
+      <WorkflowRunDetailPage />
+    </Router>
+  );
+
+describe("workflow run stage cards", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockUseFetchAgentRunsByNames.mockReturnValue({
+      runs: {},
+      isLoading: false,
+    });
+  });
+
+  it("renders a card per stage with agent and status", () => {
+    mockUseFetchWorkflowRun.mockReturnValue({
+      workflowRun: workflowRun(
+        "Running",
+        stagesWith(
+          {
+            name: "plan",
+            phase: "Succeeded",
+            agentRunName: "ui-plan",
+            agentRef: "planner",
+          },
+          {
+            name: "execute",
+            phase: "Running",
+            agentRunName: "ui-exec",
+            agentRef: "kai",
+          },
+          { name: "verify", agentRef: "kai" }
+        )
+      ),
+      isLoading: false,
+      fetchError: null,
+    });
+    mockUseFetchAgentRunsByNames.mockReturnValue({
+      runs: {
+        "ui-plan": childRun("ui-plan", "planner"),
+        "ui-exec": childRun("ui-exec", "kai"),
+      },
+      isLoading: false,
+    });
+
+    renderPage();
+
+    expect(
+      screen.getByText("plan", { selector: ".stage-card-name" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("execute")).toBeInTheDocument();
+    expect(screen.getByText("verify")).toBeInTheDocument();
+    expect(screen.getAllByText("planner").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("kai").length).toBeGreaterThan(0);
+    // The unstarted stage says so instead of naming an agent run.
+    expect(
+      screen.getByText("agentic.workflowRuns.notStarted")
+    ).toBeInTheDocument();
+  });
+
+  it("defaults selection to the failed stage", () => {
+    mockUseFetchWorkflowRun.mockReturnValue({
+      workflowRun: workflowRun(
+        "Failed",
+        stagesWith(
+          { name: "plan", phase: "Succeeded", agentRunName: "ui-plan" },
+          { name: "execute", phase: "Failed", agentRunName: "ui-exec" },
+          { name: "verify", phase: "Succeeded", agentRunName: "ui-verify" }
+        )
+      ),
+      isLoading: false,
+      fetchError: null,
+    });
+    mockUseFetchAgentRunsByNames.mockReturnValue({
+      runs: {
+        "ui-plan": childRun("ui-plan", "planner"),
+        "ui-exec": {
+          ...childRun("ui-exec", "kai"),
+          status: { phase: "Failed" },
+        },
+        "ui-verify": childRun("ui-verify", "kai"),
+      },
+      isLoading: false,
+    });
+
+    renderPage();
+
+    expect(mockRunPanel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        run: expect.objectContaining({
+          metadata: expect.objectContaining({ name: "ui-exec" }),
+        }),
+        stageInstructions: undefined,
+      })
+    );
+  });
+
+  it("selecting a card updates ?stage", async () => {
+    mockUseFetchWorkflowRun.mockReturnValue({
+      workflowRun: workflowRun(
+        "Running",
+        stagesWith(
+          { name: "plan", phase: "Succeeded", agentRunName: "ui-plan" },
+          { name: "execute", phase: "Running", agentRunName: "ui-exec" }
+        )
+      ),
+      isLoading: false,
+      fetchError: null,
+    });
+    mockUseFetchAgentRunsByNames.mockReturnValue({
+      runs: {
+        "ui-plan": childRun("ui-plan", "planner"),
+        "ui-exec": childRun("ui-exec", "kai"),
+      },
+      isLoading: false,
+    });
+
+    renderPage();
+
+    await userEvent.click(
+      screen.getByText("plan", { selector: ".stage-card-name" })
+    );
+    expect(history.location.search).toBe("?stage=plan");
+  });
+
+  it("unstarted stage shows instructions", async () => {
+    mockUseFetchWorkflowRun.mockReturnValue({
+      workflowRun: workflowRun(
+        "Running",
+        stagesWith(
+          { name: "plan", phase: "Succeeded", agentRunName: "ui-plan" },
+          {
+            name: "verify",
+            instructions: "verify the branch builds",
+            agentRef: "kai",
+          }
+        ),
+        { currentStage: "plan" }
+      ),
+      isLoading: false,
+      fetchError: null,
+    });
+    mockUseFetchAgentRunsByNames.mockReturnValue({
+      runs: { "ui-plan": childRun("ui-plan", "planner") },
+      isLoading: false,
+    });
+
+    renderPage();
+
+    // Select the unstarted stage by clicking its card.
+    await userEvent.click(screen.getByText("verify"));
+    expect(history.location.search).toBe("?stage=verify");
+    expect(screen.getByText("verify the branch builds")).toBeInTheDocument();
+    expect(
+      screen.getByText("agentic.workflowRuns.stageNotStarted")
+    ).toBeInTheDocument();
+  });
+
+  it("failure header has no raw JSON", () => {
+    mockUseFetchWorkflowRun.mockReturnValue({
+      workflowRun: workflowRun(
+        "Failed",
+        stagesWith({
+          name: "execute",
+          phase: "Failed",
+          agentRunName: "ui-exec",
+        }),
+        {
+          conditions: [
+            {
+              type: "Succeeded",
+              status: "False",
+              reason: "StageFailed",
+              message:
+                'Stage "execute" did not succeed: {"exitCode":1,"outcome":"failed","stopReason":"final push: push konveyor/migration-1793928293: malformed unpack status: \\u0001001dunpack index-pack failed","usage":{"turnsUsed":67,"contextUsed":114330,"contextSize":128000}}',
+            },
+          ],
+        }
+      ),
+      isLoading: false,
+      fetchError: null,
+    });
+    mockUseFetchAgentRunsByNames.mockReturnValue({
+      runs: {
+        "ui-exec": {
+          ...childRun("ui-exec", "kai"),
+          status: { phase: "Failed" },
+        },
+      },
+      isLoading: false,
+    });
+
+    renderPage();
+
+    const header = screen.getByText(/final push:/);
+    expect(header).toBeInTheDocument();
+    expect(header.textContent).not.toContain("exitCode");
+  });
+});
 
 describe("workflow live-stage viewer", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockUseFetchAgentRunsByNames.mockReturnValue({
+      runs: {},
+      isLoading: false,
+    });
   });
 
-  it("automatically mounts the active child AgentRun viewer", () => {
+  it("automatically mounts the selected child AgentRun viewer", () => {
     mockUseFetchWorkflowRun.mockReturnValue({
-      workflowRun: workflowRun("Running", "Running", "ui-plan"),
+      workflowRun: workflowRun(
+        "Running",
+        stagesWith({
+          name: "plan",
+          phase: "Running",
+          agentRunName: "ui-plan",
+          execution: undefined,
+        })
+      ),
       isLoading: false,
       fetchError: null,
     });
-    mockUseFetchAgentRun.mockReturnValue({
-      agentRun,
+    const run = childRun("ui-plan", "planner");
+    mockUseFetchAgentRunsByNames.mockReturnValue({
+      runs: { "ui-plan": run },
       isLoading: false,
-      fetchError: null,
     });
 
-    render(
-      <MemoryRouter>
-        <WorkflowRunDetailPage />
-      </MemoryRouter>
-    );
+    renderPage();
 
-    expect(mockUseFetchAgentRun).toHaveBeenCalledWith("ui-plan");
+    expect(mockUseFetchAgentRunsByNames).toHaveBeenCalledWith(["ui-plan"]);
     // Auto mode (no `execution`): a neutral note, never the approval warning.
     expect(
       screen.queryByText("agentic.workflowRuns.approvalViewerTitle")
@@ -113,12 +332,9 @@ describe("workflow live-stage viewer", () => {
     expect(
       screen.getByText("agentic.workflowRuns.autoModeViewerNote")
     ).toBeInTheDocument();
-    expect(screen.getByTestId("chat-panel")).toBeInTheDocument();
-    expect(mockChatPanel).toHaveBeenCalledWith(
+    expect(mockRunPanel).toHaveBeenCalledWith(
       expect.objectContaining({
-        runName: "ui-plan",
-        status: agentRun.status,
-        agentRef: "planner",
+        run,
         targetBranch: "migration/demo",
       })
     );
@@ -126,24 +342,28 @@ describe("workflow live-stage viewer", () => {
 
   it("warns about approvals when the live AgentRun is in approve mode", () => {
     mockUseFetchWorkflowRun.mockReturnValue({
-      workflowRun: workflowRun("Running", "Running", "ui-plan"),
+      workflowRun: workflowRun(
+        "Running",
+        stagesWith({
+          name: "plan",
+          phase: "Running",
+          agentRunName: "ui-plan",
+        })
+      ),
       isLoading: false,
       fetchError: null,
     });
-    mockUseFetchAgentRun.mockReturnValue({
-      agentRun: {
-        ...agentRun,
-        spec: { agentRef: "planner", execution: { mode: "approve" } },
+    mockUseFetchAgentRunsByNames.mockReturnValue({
+      runs: {
+        "ui-plan": {
+          ...childRun("ui-plan", "planner"),
+          spec: { agentRef: "planner", execution: { mode: "approve" } },
+        },
       },
       isLoading: false,
-      fetchError: null,
     });
 
-    render(
-      <MemoryRouter>
-        <WorkflowRunDetailPage />
-      </MemoryRouter>
-    );
+    renderPage();
 
     expect(
       screen.getByText("agentic.workflowRuns.approvalViewerTitle")
@@ -155,51 +375,69 @@ describe("workflow live-stage viewer", () => {
 
   it("warns from the stage's own execution before the AgentRun loads", () => {
     mockUseFetchWorkflowRun.mockReturnValue({
-      workflowRun: workflowRun("Running", "Running", "ui-plan", {
-        mode: "approve",
-      }),
+      workflowRun: workflowRun(
+        "Running",
+        stagesWith({
+          name: "plan",
+          phase: "Running",
+          agentRunName: "ui-plan",
+          execution: { mode: "approve" } as ExecutionSpec,
+        })
+      ),
       isLoading: false,
       fetchError: null,
     });
-    mockUseFetchAgentRun.mockReturnValue({
-      agentRun: undefined,
+    mockUseFetchAgentRunsByNames.mockReturnValue({
+      runs: {},
       isLoading: true,
-      fetchError: null,
     });
 
-    render(
-      <MemoryRouter>
-        <WorkflowRunDetailPage />
-      </MemoryRouter>
-    );
+    renderPage();
 
     expect(
       screen.getByText("agentic.workflowRuns.approvalViewerTitle")
     ).toBeInTheDocument();
   });
 
-  it("does not mount a viewer after the workflow finishes", () => {
+  it("shows the recorded panel after the workflow finishes", () => {
     mockUseFetchWorkflowRun.mockReturnValue({
-      workflowRun: workflowRun("Succeeded", "Succeeded", "ui-plan"),
+      workflowRun: workflowRun(
+        "Succeeded",
+        stagesWith({
+          name: "plan",
+          phase: "Succeeded",
+          agentRunName: "ui-plan",
+        })
+      ),
       isLoading: false,
       fetchError: null,
     });
-    mockUseFetchAgentRun.mockReturnValue({
-      agentRun: undefined,
+    mockUseFetchAgentRunsByNames.mockReturnValue({
+      runs: {
+        "ui-plan": {
+          ...childRun("ui-plan", "planner"),
+          status: { phase: "Succeeded" },
+        },
+      },
       isLoading: false,
-      fetchError: null,
     });
 
-    render(
-      <MemoryRouter>
-        <WorkflowRunDetailPage />
-      </MemoryRouter>
+    renderPage();
+
+    // The finished workflow keeps its stage's recorded run visible.
+    expect(mockRunPanel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        run: expect.objectContaining({
+          status: expect.objectContaining({ phase: "Succeeded" }),
+        }),
+      })
     );
-
-    expect(mockUseFetchAgentRun).toHaveBeenCalledWith("");
+    // No live-mode notice on a finished workflow.
     expect(
       screen.queryByText("agentic.workflowRuns.approvalViewerTitle")
     ).not.toBeInTheDocument();
-    expect(screen.queryByTestId("chat-panel")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("agentic.workflowRuns.autoModeViewerNote")
+    ).not.toBeInTheDocument();
   });
 });

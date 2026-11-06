@@ -1,4 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryStatus,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { AxiosError } from "axios";
 
 import { DEFAULT_REFETCH_INTERVAL } from "@app/Constants";
@@ -59,6 +65,35 @@ export const useFetchAgentRun = (
     agentRun: data,
     isLoading,
     fetchError: error,
+  };
+};
+
+/**
+ * The child AgentRuns of a workflow-run's stages, fetched in parallel on
+ * the same key and 5s poll as useFetchAgentRun, so the stage cards and
+ * the per-stage panel see the same cache the run pages do.
+ */
+export const useFetchAgentRunsByNames = (names: string[]) => {
+  const queries = useQueries({
+    queries: names.map((name) => ({
+      queryKey: [AGENT_RUN_QUERY_KEY, name],
+      queryFn: () => getAgentRun(name),
+      retry: AGENTIC_QUERY_RETRY,
+      refetchInterval: (
+        _data: unknown,
+        query: { state: { status: QueryStatus } }
+      ) => pollUnlessErrored(query, DEFAULT_REFETCH_INTERVAL),
+      refetchIntervalInBackground: true,
+      enabled: !!name,
+    })),
+  });
+  const runs: Record<string, AgentRun | undefined> = {};
+  names.forEach((name, i) => {
+    runs[name] = queries[i]?.data;
+  });
+  return {
+    runs,
+    isLoading: queries.some((q) => q.isLoading),
   };
 };
 
