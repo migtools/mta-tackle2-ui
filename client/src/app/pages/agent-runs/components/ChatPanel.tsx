@@ -1092,7 +1092,7 @@ function formatCost(amount: number, currency?: string): string {
  * ("turn 17 of 200"), and a second tally of the responses this connection
  * happened to see disagrees with it after any late attach or reconnect.
  */
-function UsageBadge({ usage }: { usage: RunUsage }) {
+export function UsageBadge({ usage }: { usage: RunUsage }) {
   const { t } = useTranslation();
   const cost = usage.cost ?? usage.summedCost;
   const costText = cost === undefined ? null : formatCost(cost, usage.currency);
@@ -1489,7 +1489,7 @@ function PlanEntryIcon({ status }: { status: string }) {
  * The agent's task ladder, pinned between the header and the transcript.
  * Collapsed, it is one line: how far along, and the rung in progress.
  */
-function PinnedPlan({ entries }: { entries: PlanEntry[] }) {
+export function PinnedPlan({ entries }: { entries: PlanEntry[] }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(true);
   const done = entries.filter((e) => e.status === "completed").length;
@@ -1538,7 +1538,7 @@ function PinnedPlan({ entries }: { entries: PlanEntry[] }) {
   );
 }
 
-function ChatItemView({
+export function ChatItemView({
   item,
   botName,
   userName,

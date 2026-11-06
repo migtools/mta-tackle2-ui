@@ -39,11 +39,11 @@ import {
 import { formatPath } from "@app/utils/utils";
 
 import { BranchPanel, repoBranchUrl } from "./components/BranchPanel";
-import { ChatPanel } from "./components/ChatPanel";
 import { CreateRunModal } from "./components/CreateRunModal";
 import { PhaseLabel } from "./components/PhaseLabel";
 import { RunConditionSummary } from "./components/RunConditionSummary";
 import { RunSkillsSummary } from "./components/RunSkillsSummary";
+import { RunPanel } from "./components/run-panel";
 
 import "./agent-runs.css";
 
@@ -340,13 +340,14 @@ const AgentRunDetailPage: React.FC = () => {
         className="run-detail-chat-section"
         padding={{ default: "padding" }}
       >
-        <ChatPanel
+        <RunPanel
           key={runName} // a different run starts a fresh transcript
-          runName={runName}
-          status={agentRun.status}
-          agentRef={agentRun.spec.agentRef}
+          run={agentRun}
+          agent={agent}
+          skillCards={skillCards}
+          skillCollections={skillCollections}
+          skillsUnresolved={skillsUnresolved}
           targetBranch={coordinates.targetBranch}
-          targetBranchUrl={targetBranchUrl}
         />
       </PageSection>
       {rerunOpen && (
