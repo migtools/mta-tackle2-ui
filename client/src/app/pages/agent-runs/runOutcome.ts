@@ -27,24 +27,42 @@ export function failureStopReason(
   return text;
 }
 
+/** Strips C0 control characters other than newline from text. */
+function stripControlChars(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\x00-\x08\x0B-\x1F\x7F]/g, "");
+}
+
 /**
  * The readable part of a termination message. The controller copies the
  * agent container's whole termination log into the Succeeded condition, and
  * the Konveyor harness writes that as JSON (agentic-controller#189) — whose
- * `stopReason` is the only sentence worth showing. Returns undefined for
- * anything that is not such a JSON object, so callers keep their own text.
+ * `stopReason` is the only sentence worth showing. Workflow-run conditions
+ * prefix the JSON with their own sentence ("Stage "execute" did not
+ * succeed: {…}"); the prefix keeps its meaning next to the unwrapped
+ * reason. Returns undefined for anything that is not such a JSON object,
+ * so callers keep their own text.
  */
 export function unwrapStopReason(message?: string): string | undefined {
   if (typeof message !== "string") return undefined;
-  const text = message.trim();
-  if (!text.startsWith("{") || !text.endsWith("}")) return undefined;
+  const text = stripControlChars(message).trim();
+  // Find the JSON object, bare or after a prefix ending in ": ".
+  let json = text;
+  let prefix = "";
+  if (!text.startsWith("{")) {
+    const at = text.indexOf("{");
+    if (at < 0 || !text.slice(0, at).trimEnd().endsWith(":")) return undefined;
+    prefix = text.slice(0, at).trim();
+    json = text.slice(at);
+  }
+  if (!json.endsWith("}")) return undefined;
   try {
-    const parsed: unknown = JSON.parse(text);
+    const parsed: unknown = JSON.parse(json);
     if (typeof parsed !== "object" || parsed === null) return undefined;
     const stopReason = (parsed as HarnessTerminationData).stopReason;
-    return typeof stopReason === "string" && stopReason.trim()
-      ? stopReason.trim()
-      : undefined;
+    if (typeof stopReason !== "string" || !stopReason.trim()) return undefined;
+    const reason = stripControlChars(stopReason).trim();
+    return prefix ? `${prefix} ${reason}` : reason;
   } catch {
     return undefined;
   }

@@ -44,6 +44,14 @@ describe("unwrapStopReason", () => {
     expect(unwrapStopReason('{"stopReason":')).toBeUndefined();
     expect(unwrapStopReason(undefined)).toBeUndefined();
   });
+
+  it("unwraps a workflow-prefixed termination message", () => {
+    const message =
+      'Stage "execute" did not succeed: {"exitCode":1,"outcome":"failed","stopReason":"final push: push konveyor/migration-1793928293: malformed unpack status: \\u0001001dunpack index-pack failed","usage":{"turnsUsed":67,"contextUsed":114330,"contextSize":128000}}';
+    expect(unwrapStopReason(message)).toBe(
+      'Stage "execute" did not succeed: final push: push konveyor/migration-1793928293: malformed unpack status: 001dunpack index-pack failed'
+    );
+  });
 });
 
 describe("isGitWriteAccessFailure", () => {
