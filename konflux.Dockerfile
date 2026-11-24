@@ -17,8 +17,6 @@ RUN npm config fix
 RUN npm clean-install --ignore-scripts --no-audit --verbose && npm run build && npm run dist
 
 FROM registry.redhat.io/ubi10/nodejs-22:latest
-USER root
-RUN dnf -y install procps-ng && dnf -y clean all
 USER 1001
 
 COPY --from=builder /workspace/dist /opt/app-root/dist/
